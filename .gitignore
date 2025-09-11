@@ -1,0 +1,53 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+.venv/
+venv/
+env/
+
+# Compiled binary addons
+build
+
+# dotenv environment variables file
+.env
+.dev.vars
+
+# PM2
+.pm2/
+pids/
+logs/
+*.log
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+*.backup
+*.bak
+*.tar.gz
+*.zip
+
+# FastAPI specific
+.pytest_cache/
+
+# Output files
+output/
+uploads/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
