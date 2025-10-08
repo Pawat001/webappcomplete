@@ -155,16 +155,95 @@ def make_enhanced_vectorizer(language: str = 'auto') -> TfidfVectorizer:
         )
 
 # ---------------------------
+# Enhanced Novel Info Extraction
+# ---------------------------
+
+def extract_novel_info(file_path: str, base_path: str = "") -> Dict[str, str]:
+    """
+    Extract genre, folder name, and chapter name from file path
+    
+    Expected structure: <base>/<genre>/<novel_folder>/<chapter>.txt
+    e.g., db/Action Novels/Cultivation Online/Chapter 1.txt
+    
+    Returns:
+        Dict with keys: genre, folder_name, chapter_name, full_name
+    """
+    rel_path = os.path.relpath(file_path, base_path) if base_path else file_path
+    path_parts = rel_path.replace('\\', '/').split('/')  # Handle Windows paths
+    
+    if len(path_parts) >= 3:
+        # Full structure: genre/folder/file
+        genre = path_parts[-3]
+        folder_name = path_parts[-2]
+        chapter_name = os.path.splitext(path_parts[-1])[0]  # Remove .txt extension
+        full_name = f"{folder_name}/{chapter_name}"
+    elif len(path_parts) == 2:
+        # Simple structure: genre/file  
+        genre = path_parts[-2]
+        folder_name = "Unknown"
+        chapter_name = os.path.splitext(path_parts[-1])[0]
+        full_name = chapter_name
+    else:
+        # Just filename
+        genre = "Unknown"
+        folder_name = "Unknown" 
+        chapter_name = os.path.splitext(os.path.basename(file_path))[0]
+        full_name = chapter_name
+    
+    return {
+        "genre": genre,
+        "folder_name": folder_name,
+        "chapter_name": chapter_name,
+        "full_name": full_name
+    }
+
+def extract_input_info(filename: str) -> Dict[str, str]:
+    """
+    Extract info from input filename, handling folder upload structure
+    
+    Expected patterns:
+    - "folder_name_chapter.txt" (from folder upload)
+    - "chapter.txt" (direct upload)
+    
+    Returns:
+        Dict with keys: input_genre, input_folder, input_chapter, input_full_name
+    """
+    base_name = os.path.splitext(filename)[0]
+    
+    # Check if it contains folder structure info
+    if '_' in base_name and not base_name.startswith('file_'):
+        parts = base_name.split('_', 1)  # Split only at first underscore
+        folder_name = parts[0]
+        chapter_name = parts[1] if len(parts) > 1 else base_name
+        full_name = f"{folder_name}/{chapter_name}"
+        # Try to guess genre from folder name (simplified)
+        genre = "Input"
+    else:
+        # Direct upload or simple filename
+        folder_name = "Input"
+        chapter_name = base_name
+        full_name = chapter_name
+        genre = "Input"
+    
+    return {
+        "input_genre": genre,
+        "input_folder": folder_name,
+        "input_chapter": chapter_name,
+        "input_full_name": full_name
+    }
+
+# ---------------------------
 # Enhanced Database Loading
 # ---------------------------
 
-def load_database_enhanced(db_root: str, max_files_per_genre: int = 10) -> Tuple[List[str], List[str], List[str], str]:
+def load_database_enhanced(db_root: str, max_files_per_genre: int = 10) -> Tuple[List[str], List[Dict[str, str]], List[str], str]:
     """
-    Enhanced database loading with language detection
+    Enhanced database loading with language detection and detailed file info
     
-    Returns: texts, labels, genres, detected_language
+    Returns: texts, file_info_list, genres, detected_language
+    Where file_info_list contains dicts with genre, folder_name, chapter_name, full_name
     """
-    texts, labels, genres = [], [], []
+    texts, file_info_list, genres = [], [], []
     all_text_sample = ""
     
     if not os.path.isdir(db_root):
@@ -183,7 +262,10 @@ def load_database_enhanced(db_root: str, max_files_per_genre: int = 10) -> Tuple
             raw_text = read_txt(p)
             all_text_sample += raw_text[:1000]  # Sample for language detection
             
-            labels.append(os.path.basename(p))
+            # Extract detailed file information
+            file_info = extract_novel_info(p, db_root)
+            file_info_list.append(file_info)
+            
             genres.append(g)
             texts.append(raw_text)  # Store raw text, will preprocess later
     
@@ -197,11 +279,14 @@ def load_database_enhanced(db_root: str, max_files_per_genre: int = 10) -> Tuple
     # Preprocess all texts with detected language
     processed_texts = [enhanced_preprocess(text, detected_language) for text in texts]
     
-    return processed_texts, labels, genres, detected_language
+    return processed_texts, file_info_list, genres, detected_language
 
-def load_inputs_enhanced(input_root: str, language: str = 'auto', max_files: int = 5) -> Tuple[List[str], List[str]]:
+def load_inputs_enhanced(input_root: str, language: str = 'auto', max_files: int = 5) -> Tuple[List[str], List[Dict[str, str]]]:
     """
-    Enhanced input loading with language-aware preprocessing
+    Enhanced input loading with language-aware preprocessing and detailed file info
+    
+    Returns: processed_texts, input_info_list
+    Where input_info_list contains dicts with input_genre, input_folder, input_chapter, input_full_name
     """
     if not os.path.isdir(input_root):
         raise SystemExit(f"Input folder not found: {input_root}")
@@ -224,9 +309,15 @@ def load_inputs_enhanced(input_root: str, language: str = 'auto', max_files: int
         language = detect_language(raw_texts[0])
     
     processed_texts = [enhanced_preprocess(text, language) for text in raw_texts]
-    names = [os.path.basename(p) for p in files]
     
-    return processed_texts, names
+    # Extract detailed input information
+    input_info_list = []
+    for p in files:
+        filename = os.path.basename(p)
+        input_info = extract_input_info(filename)
+        input_info_list.append(input_info)
+    
+    return processed_texts, input_info_list
 
 # ---------------------------
 # Enhanced Pipeline
@@ -345,8 +436,36 @@ def run_enhanced_pipeline(db_root: str, input_root: str, out_root: str,
     if not comp_df.empty:
         comp_df["genre_top3"] = comp_df["genre_rank_json"].apply(format_top_genres)
 
+    # Create labels for matrix with detailed info
+    in_labels_full = [info['input_full_name'] for info in in_info_list]
+    db_labels_full = [info['full_name'] for info in db_file_info_list]
+    
     # Similarity matrix
-    sim_df = pd.DataFrame(S, index=in_labels, columns=db_labels)
+    sim_df = pd.DataFrame(S, index=in_labels_full, columns=db_labels_full)
+    
+    # Create metadata for matrix labels (for frontend use)
+    matrix_metadata = {
+        "input_labels": [
+            {
+                "index": i,
+                "short_name": info['input_chapter'],
+                "full_name": info['input_full_name'],
+                "folder_name": info['input_folder'],
+                "chapter_name": info['input_chapter'],
+                "genre": info['input_genre']
+            } for i, info in enumerate(in_info_list)
+        ],
+        "database_labels": [
+            {
+                "index": i,
+                "short_name": info['chapter_name'],
+                "full_name": info['full_name'],
+                "folder_name": info['folder_name'], 
+                "chapter_name": info['chapter_name'],
+                "genre": info['genre']
+            } for i, info in enumerate(db_file_info_list)
+        ]
+    }
 
     # Save files
     comp_csv = os.path.join(out_root, "comparison_table.csv")
@@ -367,12 +486,16 @@ def run_enhanced_pipeline(db_root: str, input_root: str, out_root: str,
             },
             "db_overall_rank": sorted([
                 {
-                    "db_doc": db_labels[j], 
-                    "genre": db_genres[j], 
+                    "db_doc": db_file_info_list[j]['full_name'],
+                    "db_doc_short": db_file_info_list[j]['chapter_name'], 
+                    "genre": db_file_info_list[j]['genre'],
+                    "folder_name": db_file_info_list[j]['folder_name'],
+                    "chapter_name": db_file_info_list[j]['chapter_name'],
                     "best_similarity": float(best_by_db[j])
                 }
-                for j in range(len(db_labels))
+                for j in range(len(db_file_info_list))
             ], key=lambda d: d["best_similarity"], reverse=True),
+            "matrix_metadata": matrix_metadata,
             "genre_rank_overall": [
                 {"genre": g, "mean": round(m,4), "max": round(mx,4)} 
                 for (g,m,mx) in genre_rank_overall
@@ -382,7 +505,7 @@ def run_enhanced_pipeline(db_root: str, input_root: str, out_root: str,
     # 9) Generate visualizations
     print("📊 Generating visualizations...")
     heatmap_path = os.path.join(out_root, "similarity_heatmap.png")
-    plot_heatmap(S, db_labels, in_labels, 
+    plot_heatmap(S, db_labels_full, in_labels_full, 
                 f"Cosine Similarity ({detected_language.title()} Text Analysis)", 
                 heatmap_path)
 
@@ -403,8 +526,8 @@ def run_enhanced_pipeline(db_root: str, input_root: str, out_root: str,
     
     lines.append("## Per-input Analysis\n")
     for _, row in comp_df.iterrows():
-        lines.append(f"- **{row['input_doc']}**")
-        lines.append(f"  - Most similar: {row['top_db_doc']} (genre: {row['top_genre']})")
+        lines.append(f"- **{row['input_doc']}** (Folder: {row['input_folder']})")
+        lines.append(f"  - Most similar: {row['top_db_doc']} (Genre: {row['top_db_genre']}, Folder: {row['top_db_folder']})")
         lines.append(f"  - Similarity score: {row['top_similarity']:.3f}")
         lines.append(f"  - Relationship: {row['relation']}")
         lines.append(f"  - Top genres: {row['genre_top3']}")
@@ -412,12 +535,17 @@ def run_enhanced_pipeline(db_root: str, input_root: str, out_root: str,
 
     lines.append("\n## Database Document Ranking\n")
     db_rank = sorted([
-        {"db_doc": db_labels[j], "genre": db_genres[j], "best_similarity": float(best_by_db[j])}
-        for j in range(len(db_labels))
+        {
+            "db_doc": db_file_info_list[j]['full_name'], 
+            "genre": db_file_info_list[j]['genre'], 
+            "folder": db_file_info_list[j]['folder_name'],
+            "best_similarity": float(best_by_db[j])
+        }
+        for j in range(len(db_file_info_list))
     ], key=lambda d: d["best_similarity"], reverse=True)
     
     for i, d in enumerate(db_rank[:10], 1):
-        lines.append(f"{i:2d}. {d['db_doc']} (genre: {d['genre']}) - {d['best_similarity']:.3f}")
+        lines.append(f"{i:2d}. {d['db_doc']} (Genre: {d['genre']}, Folder: {d['folder']}) - {d['best_similarity']:.3f}")
 
     lines.append("\n## Genre Overlap Ranking\n")
     for i, (g, m, mx) in enumerate(genre_rank_overall, 1):
@@ -439,7 +567,8 @@ def run_enhanced_pipeline(db_root: str, input_root: str, out_root: str,
             "detected_language": detected_language,
             "thai_support": THAI_SUPPORT,
             "total_documents": len(db_texts),
-            "total_inputs": len(in_texts)
+            "total_inputs": len(in_texts),
+            "matrix_metadata": matrix_metadata
         }
     }
 

@@ -66,13 +66,50 @@ app.get('/', (c) => {
                   <label class="block text-sm font-medium text-gray-700 mb-2">
                     ไฟล์ที่ต้องการวิเคราะห์ (สูงสุด 5 ไฟล์)
                   </label>
+                  
+                  {/* File Upload Options */}
+                  <div class="flex gap-3 mb-3">
+                    <button type="button" id="selectFilesBtn" class="flex items-center px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors">
+                      <i class="fas fa-file mr-2"></i>
+                      เลือกไฟล์
+                    </button>
+                    <button type="button" id="selectFolderBtn" class="flex items-center px-3 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors">
+                      <i class="fas fa-folder mr-2"></i>
+                      เลือกโฟลเดอร์
+                    </button>
+                  </div>
+                  
                   <div id="inputFilesDropzone" class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 transition-colors cursor-pointer">
                     <i class="fas fa-cloud-upload-alt text-4xl text-gray-400 mb-2"></i>
-                    <p class="text-gray-600 mb-2">ลากไฟล์มาวางที่นี่ หรือคลิกเพื่อเลือกไฟล์</p>
+                    <p class="text-gray-600 mb-2">ลากไฟล์หรือโฟลเดอร์มาวางที่นี่ หรือใช้ปุ่มด้านบน</p>
                     <p class="text-sm text-gray-500">รองรับ .txt, .docx, .pdf (สูงสุด 5 ไฟล์)</p>
                     <input type="file" id="inputFiles" name="input_files" multiple accept=".txt,.docx,.pdf" class="hidden" />
+                    <input type="file" id="inputFolder" name="input_folder" webkitdirectory accept=".txt,.docx,.pdf" class="hidden" />
                   </div>
                   <div id="inputFilesList" class="mt-3"></div>
+                </div>
+
+                {/* Novel Naming Section */}
+                <div class="mb-6">
+                  <label for="novelNames" class="block text-sm font-medium text-gray-700 mb-2">
+                    ตั้งชื่อนิยาย/เอกสาร (ไม่บังคับ)
+                  </label>
+                  <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <div class="flex items-start space-x-2 mb-3">
+                      <i class="fas fa-info-circle text-blue-600 mt-1"></i>
+                      <p class="text-sm text-blue-800">
+                        ใส่ชื่อสำหรับไฟล์หรือข้อความที่อัปโหลด เพื่อให้ง่ายต่อการระบุในผลลัพธ์ (แยกด้วยเครื่องหมายจุลภาค)
+                      </p>
+                    </div>
+                    <input 
+                      type="text" 
+                      id="novelNames" 
+                      name="novel_names" 
+                      placeholder="เช่น: นิยายเรื่องที่ 1, บทความวิชาการ, เรื่องสั้น"
+                      class="w-full px-3 py-2 border border-blue-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <div id="novelNamesPreview" class="mt-2 text-sm text-gray-600"></div>
+                  </div>
                 </div>
 
                 {/* Direct Text Input */}
@@ -190,7 +227,7 @@ app.get('/', (c) => {
         <footer class="bg-white border-t mt-12">
           <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
             <div class="text-center text-gray-600">
-              <p>&copy; 2024 Novel Similarity Analyzer. สร้างด้วย FastAPI + Hono + Cloudflare Pages</p>
+              <p>&copy; 2025 Novel Similarity Analyzer. สร้างด้วย FastAPI + Hono + Cloudflare Pages</p>
             </div>
           </div>
         </footer>

@@ -37,25 +37,23 @@ webapp/
 │   ├── public/static/      # Static assets
 │   ├── package.json        # Node.js dependencies
 │   ├── ecosystem.config.cjs # PM2 configuration
-│   └── start.sh           # Frontend startup script
-└── README.md              # Main documentation
+│   └── start.sh            # Frontend startup script
+└── README.md               # Main documentation
 ```
 
 ## 🔧 Installation Steps
 
 ### Step 1: Clone/Download Project
-
 ```bash
 # If you have the project files
 cd /path/to/webapp
 
 # Or download from repository
-git clone <repository-url>
+git clone <repository>
 cd webapp
 ```
 
 ### Step 2: Backend Setup (FastAPI)
-
 ```bash
 # Navigate to backend directory
 cd backend
@@ -76,12 +74,11 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ### Step 3: Frontend Setup (Hono)
-
 ```bash
 # Open new terminal and navigate to frontend
 cd frontend
 
-# Method 1: Use automated script (Recommended)  
+# Method 1: Use automated script (Recommended)
 ./start.sh
 
 # Method 2: Manual setup
@@ -91,7 +88,6 @@ pm2 start ecosystem.config.cjs
 ```
 
 ### Step 4: Verify Installation
-
 ```bash
 # Test backend
 curl http://localhost:8000/api/health
@@ -104,9 +100,8 @@ pm2 list
 ```
 
 ## 🌐 Access URLs
-
 - **Frontend Application**: http://localhost:3000
-- **Backend API**: http://localhost:8000  
+- **Backend API**: http://localhost:8000
 - **API Documentation**: http://localhost:8000/docs
 - **Redoc Documentation**: http://localhost:8000/redoc
 
@@ -121,8 +116,7 @@ pm2 list
 
 #### Database Files (ฐานข้อมูลสำหรับเปรียบเทียบ)
 สร้างไฟล์ `.zip` ที่มีโครงสร้างดังนี้:
-
-```
+```text
 database.zip
 ├── นิยายรัก/
 │   ├── นิยายรัก1.txt
@@ -137,28 +131,21 @@ database.zip
 ```
 
 ### 2. Using the Web Interface
-
 1. **เปิด Browser** ไปที่ http://localhost:3000
-
 2. **อัปโหลดไฟล์ Input**:
    - ลากไฟล์มาวางใน dropzone หรือ
    - คลิกเพื่อเลือกไฟล์ หรือ
    - ใส่ข้อความโดยตรงใน textarea
-
 3. **อัปโหลดไฟล์ Database**:
    - ลากไฟล์ `.zip` มาวางใน database dropzone
-
 4. **ตั้งค่าพารามิเตอร์**:
    - **K-Neighbors**: จำนวนเอกสารที่คล้ายที่จะแสดง (แนะนำ 3-5)
    - **Duplicate Threshold**: เกณฑ์การซ้ำซ้อน (แนะนำ 0.90)
    - **Similar Threshold**: เกณฑ์ความคล้าย (แนะนำ 0.60)
-
 5. **เริ่มวิเคราะห์**: กดปุ่ม "เริ่มวิเคราะห์"
-
 6. **ดูผลลัพธ์**: รอผลลัพธ์แล้วดาวน์โหลดไฟล์
 
 ### 3. API Usage Example
-
 ```bash
 # Health check
 curl http://localhost:8000/api/health
@@ -188,7 +175,7 @@ curl "http://localhost:8000/api/download/{session_id}" -o results.zip
 
 ### Similarity Scores
 - **0.90-1.00**: ซ้ำซ้อน/เหมือนกันมาก
-- **0.60-0.90**: คล้ายคลึงกันมาก  
+- **0.60-0.90**: คล้ายคลึงกันมาก
 - **0.30-0.60**: คล้ายคลึงปานกลาง
 - **0.00-0.30**: แตกต่างกัน
 
@@ -197,7 +184,6 @@ curl "http://localhost:8000/api/download/{session_id}" -o results.zip
 ### Common Issues
 
 #### Backend Issues
-
 **1. Port 8000 already in use**
 ```bash
 # Kill process on port 8000
@@ -223,13 +209,11 @@ python -c "import pythainlp; pythainlp.corpus.download('thai2fit_wv')"
 ```
 
 #### Frontend Issues
-
 **1. Port 3000 already in use**
 ```bash
 # Kill process on port 3000
 fuser -k 3000/tcp
 pkill -f "wrangler pages dev"
-
 # Or use PM2
 pm2 delete all
 ```
@@ -251,7 +235,6 @@ npm run build
 ```
 
 ### Performance Issues
-
 **1. Slow analysis**
 - ลดขนาดไฟล์ input
 - ลดจำนวนไฟล์ใน database
@@ -265,14 +248,13 @@ npm run build
 ## 🛠️ Development Mode
 
 ### For Developers
-
 ```bash
 # Backend development
 cd backend
 source venv/bin/activate
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
-# Frontend development  
+# Frontend development
 cd frontend
 npm run dev  # Vite dev server
 
@@ -281,7 +263,6 @@ pm2 logs novel-analyzer-frontend --lines 50
 ```
 
 ### Environment Variables
-
 Backend (`.env` file):
 ```bash
 # Optional configurations

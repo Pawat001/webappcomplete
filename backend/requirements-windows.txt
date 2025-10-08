@@ -1,0 +1,23 @@
+# Novel Similarity Analyzer - Backend Requirements for Windows
+# Compatible with Python 3.8+
+
+# Core FastAPI stack
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+aiofiles==23.2.1
+
+# Document processing
+python-docx==1.1.0
+PyPDF2==3.0.1
+
+# Data science and ML
+numpy==1.24.4
+pandas==2.0.3
+scikit-learn==1.3.2
+matplotlib==3.7.5
+seaborn==0.12.2
+networkx==3.2.1
+
+# Optional Thai language support (install manually if needed)
+# pythainlp==4.0.2

@@ -1,0 +1,28 @@
+{
+  "name": "novel-similarity-analyzer",
+  "version": "1.0.0",
+  "type": "module", 
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 3000",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 3000", 
+    "serve": "vite preview --host 0.0.0.0 --port 3000",
+    "clean": "rmdir /s /q dist node_modules 2>nul || echo Cleaned",
+    "install:clean": "npm run clean && npm install",
+    "test": "curl http://localhost:3000 || echo Frontend not running"
+  },
+  "dependencies": {
+    "hono": "^4.2.0"
+  },
+  "devDependencies": {
+    "@hono/vite-cloudflare-pages": "^0.4.2",
+    "vite": "^5.4.0", 
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18.12.0"
+  },
+  "keywords": ["novel", "similarity", "analyzer", "thai", "nlp"],
+  "author": "Novel Similarity Analyzer Team",
+  "license": "MIT"
+}

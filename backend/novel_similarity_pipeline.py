@@ -76,26 +76,71 @@ def make_vectorizer():
     return TfidfVectorizer(token_pattern=r"\b\w+\b", min_df=1, max_df=0.95)
 
 def annotate_heatmap(ax, im, data):
-    # Put text annotations on heatmap cells
+    # Put text annotations on heatmap cells with improved font size
     nrows, ncols = data.shape
+    
+    # Calculate appropriate font size based on cell size
+    if max(nrows, ncols) > 15:
+        fontsize = 6  # Very small for large matrices
+    elif max(nrows, ncols) > 10:
+        fontsize = 8  # Small for medium matrices  
+    else:
+        fontsize = 9  # Standard for small matrices
+    
     for i in range(nrows):
         for j in range(ncols):
-            ax.text(j, i, f"{data[i, j]:.2f}", ha="center", va="center", fontsize=8)
+            # Use white text for dark cells, black for light cells for better contrast
+            text_color = "white" if data[i, j] > 0.6 else "black"
+            ax.text(j, i, f"{data[i, j]:.2f}", ha="center", va="center", 
+                   fontsize=fontsize, color=text_color, weight='bold')
 
 def plot_heatmap(matrix: np.ndarray, xlabels: List[str], ylabels: List[str], title: str, outpath: str):
-    fig = plt.figure(figsize=(max(6, len(xlabels)*0.6), max(4, len(ylabels)*0.5)))
+    # Calculate optimal cell size based on number of items
+    nrows, ncols = len(ylabels), len(xlabels)
+    
+    # Minimum cell size of 40px as requested, with scaling for larger matrices
+    cell_width = max(0.8, min(1.2, 40/72))  # Convert 40px to inches (72 DPI base)
+    cell_height = max(0.6, min(1.0, 40/72))
+    
+    # Calculate figure size with proper margins
+    fig_width = max(8, ncols * cell_width + 3)  # +3 for margins and labels
+    fig_height = max(6, nrows * cell_height + 2.5)  # +2.5 for margins and labels
+    
+    fig = plt.figure(figsize=(fig_width, fig_height))
     ax = fig.add_subplot(111)
-    im = ax.imshow(matrix, aspect="auto")
+    
+    # Use a better colormap with proper range
+    im = ax.imshow(matrix, aspect="auto", cmap='RdYlBu_r', vmin=0, vmax=1)
+    
+    # Add colorbar
+    cbar = plt.colorbar(im, ax=ax)
+    cbar.set_label('ความคล้ายคลึง (Similarity Score)', rotation=270, labelpad=15)
+    
+    # Set ticks and labels
     ax.set_xticks(np.arange(len(xlabels)))
-    ax.set_xticklabels(xlabels, rotation=45, ha="right")
     ax.set_yticks(np.arange(len(ylabels)))
-    ax.set_yticklabels(ylabels)
-    ax.set_title(title)
-    ax.set_xlabel("Database")
-    ax.set_ylabel("Inputs")
+    
+    # Truncate long labels to prevent overlap
+    max_label_length = 25
+    short_xlabels = [label[:max_label_length] + '...' if len(label) > max_label_length else label for label in xlabels]
+    short_ylabels = [label[:max_label_length] + '...' if len(label) > max_label_length else label for label in ylabels]
+    
+    ax.set_xticklabels(short_xlabels, rotation=45, ha="right", fontsize=9)
+    ax.set_yticklabels(short_ylabels, fontsize=9)
+    
+    # Set title and labels
+    ax.set_title(title, fontsize=14, pad=20)
+    ax.set_xlabel("ฐานข้อมูล (Database)", fontsize=12)
+    ax.set_ylabel("ไฟล์ที่วิเคราะห์ (Input Files)", fontsize=12)
+    
+    # Add annotations with improved visibility
     annotate_heatmap(ax, im, matrix)
-    fig.tight_layout()
-    fig.savefig(outpath, dpi=200)
+    
+    # Adjust layout to prevent label cutoff
+    plt.tight_layout()
+    
+    # Save with high DPI for better quality
+    fig.savefig(outpath, dpi=300, bbox_inches='tight')
     plt.close(fig)
 
 def plot_network(edges: List[Tuple[str, str, float]], outpath: str, topk:int=3):
@@ -135,15 +180,24 @@ def plot_network(edges: List[Tuple[str, str, float]], outpath: str, topk:int=3):
     nx.draw_networkx_nodes(G, pos, nodelist=left_nodes, node_size=800, node_shape="s", ax=ax)
     nx.draw_networkx_nodes(G, pos, nodelist=right_nodes, node_size=700, node_shape="o", ax=ax)
 
-    # Draw edges with thickness proportional to weight
-    widths = [2 + 6*G[u][v]["weight"] for u,v in G.edges()]
-    nx.draw_networkx_edges(G, pos, width=widths, ax=ax)
+    # Draw edges with THINNER lines proportional to weight
+    widths = [0.5 + 1.5*G[u][v]["weight"] for u,v in G.edges()]  # Much thinner: 0.5-2.0px
+    nx.draw_networkx_edges(G, pos, width=widths, alpha=0.7, edge_color='gray', ax=ax)
 
-    # Labels
-    nx.draw_networkx_labels(G, pos, font_size=8, ax=ax)
+    # Labels positioned to the SIDE of nodes to avoid overlap
+    label_pos = {}
+    for node, (x, y) in pos.items():
+        if node in left_nodes:
+            label_pos[node] = (x - 0.4, y)  # Move left for input nodes
+        else:
+            label_pos[node] = (x + 0.4, y)  # Move right for database nodes
+    
+    nx.draw_networkx_labels(G, label_pos, font_size=8, ax=ax,
+                           bbox=dict(boxstyle="round,pad=0.1", facecolor="white", alpha=0.9))
 
-    ax.set_title("Input ↔ Database Network (top matches)")
+    ax.set_title("Input ↔ Database Network (top matches)", fontsize=12, pad=15)
     ax.axis("off")
+    ax.margins(0.15)  # Add margins for better label visibility
     fig.tight_layout()
     fig.savefig(outpath, dpi=220)
     plt.close(fig)

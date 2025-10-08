@@ -43,12 +43,18 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS middleware for frontend communication
+# CORS middleware for frontend communication  
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=[
+        "http://localhost:3000",
+        "https://localhost:3000", 
+        "https://*.e2b.dev",
+        "https://3000-*.e2b.dev",
+        "*"  # Allow all for development
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -145,12 +151,13 @@ async def root():
 
 @app.post("/api/analyze")
 async def analyze_similarity(
-    input_files: List[UploadFile] = File(..., description="Input files to analyze (max 5 files)"),
+    input_files: List[UploadFile] = File(default=[], description="Input files to analyze (max 5 files)"),
     database_file: UploadFile = File(..., description="ZIP file containing database documents"),
     k_neighbors: int = Form(3, description="Number of top neighbors to find"),
     dup_threshold: float = Form(0.90, description="Threshold for duplicate classification"),
     similar_threshold: float = Form(0.60, description="Threshold for similar classification"),
-    text_input: Optional[str] = Form(None, description="Optional direct text input")
+    text_input: Optional[str] = Form(None, description="Optional direct text input"),
+    novel_names: Optional[str] = Form(None, description="Optional comma-separated names for input files/text")
 ):
     """
     Analyze text similarity between input files and a database of documents
@@ -187,39 +194,87 @@ async def analyze_similarity(
         for dir_path in [input_dir, db_dir, output_dir]:
             dir_path.mkdir(parents=True, exist_ok=True)
         
+        # Process novel names
+        custom_names = []
+        if novel_names and novel_names.strip():
+            custom_names = [name.strip() for name in novel_names.split(',') if name.strip()]
+        
         # Process input files
         processed_files = []
+        file_name_mapping = {}  # Maps original filename to custom name
         
         # Handle direct text input
         if text_input and text_input.strip():
-            text_file_path = input_dir / "direct_text_input.txt"
+            text_filename = "direct_text_input.txt"
+            text_file_path = input_dir / text_filename
             async with aiofiles.open(text_file_path, 'w', encoding='utf-8') as f:
                 await f.write(text_input)
-            processed_files.append("direct_text_input.txt")
+            processed_files.append(text_filename)
+            
+            # Use first custom name for text input if available
+            if custom_names:
+                file_name_mapping[text_filename] = custom_names[0]
         
         # Handle uploaded files
         for i, file in enumerate(input_files):
             if not file.filename:
                 continue
-                
-            # Save uploaded file
-            file_extension = Path(file.filename).suffix.lower()
-            temp_file_path = input_dir / f"temp_{i}_{file.filename}"
             
-            async with aiofiles.open(temp_file_path, 'wb') as f:
-                content = await file.read()
-                await f.write(content)
+            print(f"🔍 Processing file {i+1}: {file.filename}")
             
-            # Convert to TXT
-            txt_filename = f"{Path(file.filename).stem}.txt"
+            # Handle file from folder (preserve original name structure)
+            original_filename = file.filename
+            clean_filename = Path(original_filename).name  # Get just the filename without path
+            
+            # Save uploaded file with safe filename
+            file_extension = Path(clean_filename).suffix.lower()
+            safe_filename = f"file_{i:02d}_{clean_filename}"
+            temp_file_path = input_dir / safe_filename
+            
+            try:
+                async with aiofiles.open(temp_file_path, 'wb') as f:
+                    content = await file.read()
+                    await f.write(content)
+                print(f"✅ Saved temp file: {temp_file_path}")
+            except Exception as e:
+                print(f"❌ Failed to save {original_filename}: {e}")
+                continue
+            
+            # Convert to TXT with preserved name structure
+            if original_filename != clean_filename:
+                # This is from folder upload, preserve some path info
+                txt_filename = f"{Path(original_filename).parent.name}_{Path(clean_filename).stem}.txt" if Path(original_filename).parent.name else f"{Path(clean_filename).stem}.txt"
+            else:
+                txt_filename = f"{Path(clean_filename).stem}.txt"
+            
+            # Ensure unique filename
+            counter = 1
+            original_txt_filename = txt_filename
+            while txt_filename in processed_files:
+                base_name = Path(original_txt_filename).stem
+                txt_filename = f"{base_name}_{counter}.txt"
+                counter += 1
+            
             txt_file_path = input_dir / txt_filename
             
             try:
+                print(f"🔄 Converting {safe_filename} to {txt_filename}")
                 convert_file_to_txt(str(temp_file_path), str(txt_file_path))
                 processed_files.append(txt_filename)
+                print(f"✅ Converted to: {txt_file_path}")
+                
+                # Map to custom name if available
+                name_index = i + (1 if text_input and text_input.strip() else 0)
+                if name_index < len(custom_names):
+                    file_name_mapping[txt_filename] = custom_names[name_index]
+                else:
+                    # Use original filename as display name for folder uploads
+                    if original_filename != clean_filename:
+                        file_name_mapping[txt_filename] = original_filename
                 
                 # Remove temporary file
                 temp_file_path.unlink()
+                print(f"🗑️ Cleaned up temp file: {safe_filename}")
                 
             except Exception as e:
                 raise HTTPException(status_code=400, detail=f"Failed to convert {file.filename}: {str(e)}")
@@ -262,6 +317,7 @@ async def analyze_similarity(
             "message": f"Analysis completed successfully. Processed {len(processed_files)} input files.",
             "session_id": session_id,
             "processed_files": processed_files,
+            "file_name_mapping": file_name_mapping,
             "parameters": {
                 "k_neighbors": k_neighbors,
                 "dup_threshold": dup_threshold,
@@ -272,7 +328,7 @@ async def analyze_similarity(
         
         # Add file URLs and content to response
         for key, file_path in results.items():
-            if os.path.exists(file_path):
+            if isinstance(file_path, str) and os.path.exists(file_path):
                 file_url = f"/files/session_{session_id}/output/{Path(file_path).name}"
                 response_data["results"][key] = {
                     "url": file_url,
@@ -296,6 +352,9 @@ async def analyze_similarity(
                             response_data["results"][key]["base64"] = f"data:image/png;base64,{b64_data}"
                     except:
                         pass
+            elif key == "analysis_info":
+                # Skip analysis_info as it's metadata
+                continue
         
         return JSONResponse(content=response_data)
         
@@ -342,6 +401,11 @@ async def cleanup_session(session_id: str):
         return {"status": "success", "message": f"Session {session_id} cleaned up"}
     else:
         raise HTTPException(status_code=404, detail="Session not found")
+
+@app.options("/api/{path:path}")
+async def options_handler(path: str):
+    """Handle CORS preflight requests"""
+    return {"message": "OK"}
 
 @app.get("/api/health")
 async def health_check():
