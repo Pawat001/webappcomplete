@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 import aiofiles
 import uvicorn
+import pandas as pd
 
 # Document conversion
 from docx import Document
@@ -34,8 +35,12 @@ except ImportError:
     THAI_SUPPORT = False
     print("Warning: pythainlp not available. Thai text processing disabled.")
 
-# Import our enhanced similarity pipeline
-from enhanced_pipeline import run_enhanced_pipeline
+# Add backend directory to path for imports
+import sys
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+# Import original pipeline for stability
+from novel_similarity_pipeline import run_pipeline
 
 app = FastAPI(
     title="Novel Similarity Analyzer API",
@@ -48,10 +53,11 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
-        "https://localhost:3000", 
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "https://localhost:3000",
         "https://*.e2b.dev",
-        "https://3000-*.e2b.dev",
-        "*"  # Allow all for development
+        "https://3000-*.e2b.dev"
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -71,6 +77,15 @@ app.mount("/files", StaticFiles(directory=str(TEMP_DIR)), name="files")
 # ---------------------------
 # File Conversion Utilities
 # ---------------------------
+
+def convert_image_to_base64(image_path: str) -> str:
+    """Convert image file to base64 string"""
+    try:
+        with open(image_path, "rb") as img_file:
+            return base64.b64encode(img_file.read()).decode('utf-8')
+    except Exception as e:
+        print(f"Warning: Failed to convert image to base64: {str(e)}")
+        return None
 
 def extract_text_from_docx(file_path: str) -> str:
     """Extract text from DOCX file"""
@@ -296,20 +311,88 @@ async def analyze_similarity(
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Failed to extract database ZIP: {str(e)}")
         
-        # Run enhanced similarity analysis pipeline
+        # Run similarity analysis pipeline
         try:
+            print("🚀 Running Novel Similarity Analysis Pipeline...")
             results = await asyncio.to_thread(
-                run_enhanced_pipeline,
+                run_pipeline,
                 db_root=str(db_dir),
                 input_root=str(input_dir),
                 out_root=str(output_dir),
                 k_neighbors=k_neighbors,
                 dup_threshold=dup_threshold,
-                similar_threshold=similar_threshold,
-                max_files_per_genre=10
+                similar_threshold=similar_threshold
             )
+            
+            # Convert to expected format for frontend
+            results = {
+                "comparison_table": results.get("comparison_table"),
+                "similarity_matrix": results.get("similarity_matrix"), 
+                "overall_ranking": results.get("overall_ranking"),
+                "heatmap": results.get("similarity_heatmap"),
+                "network": results.get("network_top_matches"),
+                "report": results.get("report"),
+                "analysis_info": {
+                    "detected_language": "auto",
+                    "thai_support": THAI_SUPPORT,
+                    "thai_support_available": THAI_SUPPORT,
+                    # number of input files
+                    "total_input_files": len(processed_files),
+                    # db document count will be augmented below if available
+                }
+            }
+
+            # Augment overall_ranking JSON to ensure 'novel_title' and friendly metadata for UI
+            try:
+                overall_path = results.get("overall_ranking")
+                if overall_path and os.path.exists(overall_path):
+                    with open(overall_path, 'r', encoding='utf-8') as f:
+                        overall_json = json.load(f)
+
+                    # Attempt to augment db_overall_rank entries with metadata from matrix_labels
+                    db_metadata = None
+                    try:
+                        db_metadata = overall_json.get('matrix_labels', {}).get('db_metadata', None)
+                    except Exception:
+                        db_metadata = None
+
+                    if db_metadata and isinstance(db_metadata, list):
+                        # Build lookup by file name
+                        meta_lookup = {m.get('file_name'): m for m in db_metadata}
+
+                        enhanced_rank = []
+                        for entry in overall_json.get('db_overall_rank', []):
+                            db_doc = entry.get('db_doc') or entry.get('db') or entry.get('filename')
+                            meta = meta_lookup.get(db_doc, {})
+                            enhanced = dict(entry)  # copy
+                            # Prefer metadata fields when available
+                            enhanced['novel_title'] = meta.get('novel_title') or meta.get('folder_name') or entry.get('title') or 'N/A'
+                            enhanced['folder_name'] = meta.get('folder_name') or enhanced.get('folder_name') or (enhanced.get('novel_title') if enhanced.get('novel_title')!='N/A' else 'N/A')
+                            enhanced['chapter_name'] = meta.get('chapter_name') or enhanced.get('chapter_name') or os.path.splitext(db_doc)[0]
+                            enhanced['file_name'] = meta.get('file_name') or db_doc
+                            enhanced['genre'] = meta.get('genre') or enhanced.get('genre') or overall_json.get('matrix_labels', {}).get('db_labels', [])
+                            # Ensure best_similarity is present as float
+                            try:
+                                enhanced['best_similarity'] = float(enhanced.get('best_similarity', enhanced.get('best_similarity', 0)))
+                            except Exception:
+                                enhanced['best_similarity'] = 0.0
+                            enhanced_rank.append(enhanced)
+
+                        # Replace with enhanced rank
+                        overall_json['db_overall_rank'] = enhanced_rank
+
+                        # Update db document count
+                        overall_json.setdefault('analysis_info', {})
+                        overall_json['analysis_info']['total_db_documents'] = len(db_metadata)
+
+                        # Write augmented overall json back to file (so frontend receives the enriched structure)
+                        with open(overall_path, 'w', encoding='utf-8') as f:
+                            json.dump(overall_json, f, ensure_ascii=False, indent=2)
+            except Exception as e:
+                print(f"⚠️ Could not augment overall_ranking.json: {e}")
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Enhanced analysis pipeline failed: {str(e)}")
+            print(f"❌ Pipeline error: {e}")
+            raise HTTPException(status_code=500, detail=f"Analysis pipeline failed: {str(e)}")
         
         # Prepare response with file URLs and content
         response_data = {
@@ -326,35 +409,101 @@ async def analyze_similarity(
             "results": {}
         }
         
-        # Add file URLs and content to response
+                    # Add file URLs and content to response
         for key, file_path in results.items():
             if isinstance(file_path, str) and os.path.exists(file_path):
+                # Create session-specific file URL
                 file_url = f"/files/session_{session_id}/output/{Path(file_path).name}"
+                
+                # Initialize result object
                 response_data["results"][key] = {
                     "url": file_url,
                     "filename": Path(file_path).name
                 }
                 
-                # For text files, include content directly
-                if file_path.endswith('.txt') or file_path.endswith('.json'):
+                # Handle different file types
+                if file_path.endswith('.json') and key == "overall_ranking":
+                    # Read the overall ranking JSON which contains matrix labels and metadata
+                    try:
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            ranking_data = json.load(f)
+                            
+                            # Extract data for heatmap visualization
+                            matrix_data = {
+                                "url": f"/files/session_{session_id}/output/similarity_heatmap.png",
+                                "data": {
+                                    "x_labels": ranking_data["matrix_labels"]["db_labels"],
+                                    "y_labels": ranking_data["matrix_labels"]["input_labels"],
+                                }
+                            }
+                            
+                            # Read similarity matrix CSV
+                            sim_matrix_path = os.path.join(output_dir, "similarity_matrix.csv")
+                            if os.path.exists(sim_matrix_path):
+                                sim_matrix = pd.read_csv(sim_matrix_path, index_col=0)
+                                matrix_data["data"]["values"] = sim_matrix.values.tolist()
+                            
+                            # Add heatmap data to response
+                            response_data["results"]["similarity_heatmap"] = matrix_data
+                            
+                            # Extract data for network visualization
+                            network_data = {
+                                "url": f"/files/session_{session_id}/output/network_top_matches.png",
+                                "data": {
+                                    "nodes": [],
+                                    "edges": []
+                                }
+                            }
+                            
+                            # Process nodes and edges from input analysis
+                            seen_nodes = set()
+                            for analysis in ranking_data["analysis_by_input"]:
+                                input_id = analysis["input_name"]
+                                if input_id not in seen_nodes:
+                                    seen_nodes.add(input_id)
+                                    network_data["data"]["nodes"].append({
+                                        "id": input_id,
+                                        "label": analysis["input_title"],
+                                        "is_input": True
+                                    })
+                                
+                                # Add top k similar documents as nodes and edges
+                                for i, sim in enumerate(analysis["similarities"][:k_neighbors]):
+                                    db_id = sim["database_file"]
+                                    if db_id not in seen_nodes:
+                                        seen_nodes.add(db_id)
+                                        network_data["data"]["nodes"].append({
+                                            "id": db_id,
+                                            "label": sim["display_name"],
+                                            "is_input": False
+                                        })
+                                    
+                                    # Add edge
+                                    network_data["data"]["edges"].append({
+                                        "source": input_id,
+                                        "target": db_id,
+                                        "weight": sim["similarity"] / 100  # Convert percentage back to 0-1 scale
+                                    })
+                            
+                            # Add network data to response
+                            response_data["results"]["network_top_matches"] = network_data
+                            
+                            # Store original data
+                            response_data["results"][key] = {
+                                "url": file_url,
+                                "content": ranking_data
+                            }
+                            
+                    except Exception as e:
+                        print(f"Error processing overall ranking data: {e}")
+                        
+                elif file_path.endswith(('.txt', '.csv')):
+                    # Other text files - include content directly
                     try:
                         with open(file_path, 'r', encoding='utf-8') as f:
                             response_data["results"][key]["content"] = f.read()
-                    except:
-                        pass
-                
-                # For images, include base64 data (optional - for immediate display)
-                elif file_path.endswith('.png'):
-                    try:
-                        with open(file_path, 'rb') as f:
-                            img_data = f.read()
-                            b64_data = base64.b64encode(img_data).decode()
-                            response_data["results"][key]["base64"] = f"data:image/png;base64,{b64_data}"
-                    except:
-                        pass
-            elif key == "analysis_info":
-                # Skip analysis_info as it's metadata
-                continue
+                    except Exception as e:
+                        print(f"Error reading text file {file_path}: {e}")
         
         return JSONResponse(content=response_data)
         

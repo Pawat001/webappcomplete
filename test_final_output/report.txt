@@ -1,0 +1,19 @@
+# Similarity Report
+
+## Per-input top match & relation
+
+- input1.txt ⇒ chapter01.txt (genre=Romance, score=0.79, relation=similar)
+  Top genres: Romance(max=0.79,mean=0.41); Mystery(max=0.07,mean=0.07); Sci-Fi(max=0.03,mean=0.03)
+
+## Overall DB ranking (best match across inputs)
+
+- chapter01.txt (title=Pride and Prejudice, genre=Romance): 0.79
+- sherlock_holmes.txt (title=N/A, genre=Mystery): 0.07
+- prelude.txt (title=Foundation Series, genre=Sci-Fi): 0.03
+- chapter02.txt (title=Pride and Prejudice, genre=Romance): 0.03
+
+## Overall Genre overlap ranking
+
+- Romance: max=0.79, mean=0.41
+- Mystery: max=0.07, mean=0.07
+- Sci-Fi: max=0.03, mean=0.03

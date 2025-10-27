@@ -1,0 +1,79 @@
+{
+  "analysis_by_input": [
+    {
+      "input_name": "input1.txt",
+      "input_title": "Input1",
+      "similarities": [
+        {
+          "database_file": "chapter01.txt",
+          "genre": "Romance",
+          "title": "Pride and Prejudice",
+          "similarity": 78.7
+        },
+        {
+          "database_file": "sherlock_holmes.txt",
+          "genre": "Mystery",
+          "title": "N/A",
+          "similarity": 7.46
+        },
+        {
+          "database_file": "prelude.txt",
+          "genre": "Sci-Fi",
+          "title": "Foundation Series",
+          "similarity": 3.34
+        },
+        {
+          "database_file": "chapter02.txt",
+          "genre": "Romance",
+          "title": "Pride and Prejudice",
+          "similarity": 2.85
+        }
+      ]
+    }
+  ],
+  "db_overall_rank_desc": "DB doc with highest similarity to any input (descending)",
+  "db_overall_rank": [
+    {
+      "db_doc": "chapter01.txt",
+      "genre": "Romance",
+      "title": "Pride and Prejudice",
+      "best_similarity": 0.7869721719480175
+    },
+    {
+      "db_doc": "sherlock_holmes.txt",
+      "genre": "Mystery",
+      "title": "N/A",
+      "best_similarity": 0.07456569167130031
+    },
+    {
+      "db_doc": "prelude.txt",
+      "genre": "Sci-Fi",
+      "title": "Foundation Series",
+      "best_similarity": 0.033403763441064584
+    },
+    {
+      "db_doc": "chapter02.txt",
+      "genre": "Romance",
+      "title": "Pride and Prejudice",
+      "best_similarity": 0.028499752929002517
+    }
+  ],
+  "genre_rank_overall_desc": "Genres ranked by max similarity across inputs (then mean)",
+  "genre_rank_overall": [
+    {
+      "genre": "Romance",
+      "mean": 0.4077,
+      "max": 0.787
+    },
+    {
+      "genre": "Mystery",
+      "mean": 0.0746,
+      "max": 0.0746
+    },
+    {
+      "genre": "Sci-Fi",
+      "mean": 0.0334,
+      "max": 0.0334
+    }
+  ]
+}

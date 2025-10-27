@@ -3,7 +3,7 @@ module.exports = {
   apps: [
     {
       name: 'novel-analyzer-frontend',
-      script: 'npx',
+      script: './dist/_worker.js',
       args: 'wrangler pages dev dist --ip 0.0.0.0 --port 3000',
       env: {
         NODE_ENV: 'development',

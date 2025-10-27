@@ -25,6 +25,10 @@ app.get('/', (c) => {
         <script src="https://cdn.tailwindcss.com"></script>
         <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet" />
         <link href="/static/styles.css" rel="stylesheet" />
+        {/* Inject API base URL from Vite env */}
+        <script dangerouslySetInnerHTML={{
+          __html: `window.apiBaseUrl = '${import.meta.env.VITE_API_URL || 'http://localhost:8000'}';`
+        }} />
       </head>
       <body class="bg-gray-50 min-h-screen">
         {/* Header */}
@@ -227,7 +231,7 @@ app.get('/', (c) => {
         <footer class="bg-white border-t mt-12">
           <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
             <div class="text-center text-gray-600">
-              <p>&copy; 2025 Novel Similarity Analyzer. สร้างด้วย FastAPI + Hono + Cloudflare Pages</p>
+              <p>&copy; 2025 Novel Similarity Analyzer. เครื่องมือวิเคราะห์ความคล้ายคลึงของนิยายและเอกสาร</p>
             </div>
           </div>
         </footer>

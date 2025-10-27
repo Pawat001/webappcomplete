@@ -30,29 +30,76 @@ def simple_preprocess(text: str) -> str:
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
-def load_database(db_root: str) -> Tuple[List[str], List[str], List[str]]:
+def extract_novel_info(file_path: str, genre_path: str) -> Dict[str, str]:
     """
-    Returns: texts, labels(doc names), genres (same length as texts)
-    Expects folder structure ./db/<genre>/**/*.txt (recursive)
+    Extract genre, folder name, and chapter name from file path
+    
+    Args:
+        file_path: Full path to the text file
+        genre_path: Path to the genre directory
+        
+    Returns:
+        Dict with genre, folder_name, chapter_name, display_name
     """
-    texts, labels, genres = [], [], []
+    rel_path = os.path.relpath(file_path, genre_path)
+    path_parts = rel_path.split(os.sep)
+    
+    genre = os.path.basename(genre_path)
+    
+    if len(path_parts) > 1:
+        # 3-level structure: Genre/Novel Title/Filename.txt
+        folder_name = path_parts[0].replace('_', ' ').replace('-', ' ')
+        chapter_name = os.path.splitext(path_parts[-1])[0]
+        display_name = f"{folder_name} - {chapter_name}"
+        novel_title = folder_name
+    else:
+        # 2-level structure: Genre/Filename.txt
+        folder_name = "N/A"
+        chapter_name = os.path.splitext(path_parts[0])[0]
+        display_name = chapter_name
+        novel_title = "N/A"
+    
+    return {
+        "genre": genre,
+        "folder_name": folder_name,
+        "chapter_name": chapter_name,
+        "display_name": display_name,
+        "novel_title": novel_title,
+        "file_name": os.path.basename(file_path)
+    }
+
+def load_database(db_root: str) -> Tuple[List[str], List[str], List[str], List[str], List[Dict]]:
+    """
+    Returns: texts, labels(doc names), genres, titles, metadata (same length as texts)
+    Expects folder structure ./db/<genre>/<title>/*.txt or ./db/<genre>/*.txt
+    """
+    texts, labels, genres, titles, metadata = [], [], [], [], []
     if not os.path.isdir(db_root):
         raise SystemExit(f"Database folder not found: {db_root}")
     genre_dirs = sorted([d for d in os.listdir(db_root) if os.path.isdir(os.path.join(db_root, d))])
     if not genre_dirs:
         raise SystemExit(f"No genre subfolders inside {db_root}. Expected: {db_root}/<genre>/*.txt")
+    
     for g in genre_dirs:
         gpath = os.path.join(db_root, g)
         # ✅ recursive glob เพื่อให้หาไฟล์ในทุก subfolder
         files = sorted(glob.glob(os.path.join(gpath, "**", "*.txt"), recursive=True))
-        files = files[:10]  # จำกัดแนวละ 10 เรื่อง
+        files = files[:50]  # เพิ่มจำกัดไฟล์ต่อ genre
+        
         for p in files:
-            labels.append(os.path.basename(p))
-            genres.append(g)
+            # Extract comprehensive file information
+            file_info = extract_novel_info(p, gpath)
+            
+            labels.append(file_info["file_name"])
+            genres.append(file_info["genre"])
+            titles.append(file_info["novel_title"])
+            metadata.append(file_info)
+            
             texts.append(simple_preprocess(read_txt(p)))
+            
     if not texts:
         raise SystemExit("No .txt files found in the database.")
-    return texts, labels, genres
+    return texts, labels, genres, titles, metadata
 
 def load_inputs(input_root: str, max_files: int = 5) -> Tuple[List[str], List[str]]:
     """
@@ -79,13 +126,8 @@ def annotate_heatmap(ax, im, data):
     # Put text annotations on heatmap cells with improved font size
     nrows, ncols = data.shape
     
-    # Calculate appropriate font size based on cell size
-    if max(nrows, ncols) > 15:
-        fontsize = 6  # Very small for large matrices
-    elif max(nrows, ncols) > 10:
-        fontsize = 8  # Small for medium matrices  
-    else:
-        fontsize = 9  # Standard for small matrices
+    # Use fixed font size of 9px for better readability
+    fontsize = 9  # Fixed 9px font size as requested
     
     for i in range(nrows):
         for j in range(ncols):
@@ -98,9 +140,9 @@ def plot_heatmap(matrix: np.ndarray, xlabels: List[str], ylabels: List[str], tit
     # Calculate optimal cell size based on number of items
     nrows, ncols = len(ylabels), len(xlabels)
     
-    # Minimum cell size of 40px as requested, with scaling for larger matrices
-    cell_width = max(0.8, min(1.2, 40/72))  # Convert 40px to inches (72 DPI base)
-    cell_height = max(0.6, min(1.0, 40/72))
+    # Fixed cell size of 40px as requested (convert to inches at 300 DPI)
+    cell_width = 40/300  # 40px at 300 DPI = ~0.133 inches  
+    cell_height = 40/300
     
     # Calculate figure size with proper margins
     fig_width = max(8, ncols * cell_width + 3)  # +3 for margins and labels
@@ -184,16 +226,18 @@ def plot_network(edges: List[Tuple[str, str, float]], outpath: str, topk:int=3):
     widths = [0.5 + 1.5*G[u][v]["weight"] for u,v in G.edges()]  # Much thinner: 0.5-2.0px
     nx.draw_networkx_edges(G, pos, width=widths, alpha=0.7, edge_color='gray', ax=ax)
 
-    # Labels positioned to the SIDE of nodes to avoid overlap
+    # Labels positioned to the SIDE of nodes to avoid overlap with proper offset
     label_pos = {}
     for node, (x, y) in pos.items():
         if node in left_nodes:
-            label_pos[node] = (x - 0.4, y)  # Move left for input nodes
+            label_pos[node] = (x - 0.6, y)  # Move further left for input nodes
         else:
-            label_pos[node] = (x + 0.4, y)  # Move right for database nodes
+            label_pos[node] = (x + 0.6, y)  # Move further right for database nodes
     
-    nx.draw_networkx_labels(G, label_pos, font_size=8, ax=ax,
-                           bbox=dict(boxstyle="round,pad=0.1", facecolor="white", alpha=0.9))
+    # Use text-anchor equivalent and better positioning
+    nx.draw_networkx_labels(G, label_pos, font_size=7, ax=ax,
+                           bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.95),
+                           horizontalalignment='left' if len(left_nodes) > 0 else 'right')
 
     ax.set_title("Input ↔ Database Network (top matches)", fontsize=12, pad=15)
     ax.axis("off")
@@ -220,8 +264,8 @@ def run_pipeline(db_root: str, input_root: str, out_root: str,
                  similar_threshold: float = 0.60):
     os.makedirs(out_root, exist_ok=True)
 
-    # 1) Load database
-    db_texts, db_labels, db_genres = load_database(db_root)
+    # 1) Load database with metadata
+    db_texts, db_labels, db_genres, db_titles, db_metadata = load_database(db_root)
 
     # 2) Load inputs (3–5 files preferred)
     in_texts, in_labels = load_inputs(input_root, max_files=5)
@@ -259,10 +303,33 @@ def run_pipeline(db_root: str, input_root: str, out_root: str,
             key=lambda x: x[2], reverse=True
         )
 
+        # Create detailed similarity data for this input with comprehensive metadata
+        input_similarities = []
+        for j in order:  # Show ALL matches, not just top k_neighbors
+            file_meta = db_metadata[j]
+            input_similarities.append({
+                "database_file": db_labels[j],
+                "genre": db_genres[j], 
+                "title": db_titles[j],  # Novel title
+                "folder_name": file_meta["folder_name"],
+                "chapter_name": file_meta["chapter_name"],
+                "display_name": file_meta["display_name"],
+                "similarity": round(float(sims[j]) * 100, 2)  # Convert to percentage
+            })
+        
+        # เพิ่มข้อมูลครบถ้วนของ top match
+        top_novel_title = db_titles[top_idx]
+        top_metadata = db_metadata[top_idx]
+        
         rows.append({
             "input_doc": in_name,
+            "input_similarities": input_similarities,
             "top_db_doc": top_db,
             "top_genre": top_genre,
+            "top_novel_title": top_novel_title,
+            "top_folder_name": top_metadata["folder_name"],
+            "top_chapter_name": top_metadata["chapter_name"],
+            "top_display_name": top_metadata["display_name"],
             "top_similarity": round(top_score, 4),
             "relation": relation,
             "genre_rank_json": json.dumps([{"genre": g, "mean": round(m,4), "max": round(mx,4)} for g,m,mx in genre_rank], ensure_ascii=False)
@@ -271,8 +338,20 @@ def run_pipeline(db_root: str, input_root: str, out_root: str,
     # 6) Overall rankings
     # 6.1 Which DB story is most similar (best match) across all inputs?
     best_by_db = S.max(axis=0)  # (N_db,)
-    db_overall_rank = sorted([(db_labels[j], db_genres[j], float(best_by_db[j]))],
-                             key=lambda x: x[2], reverse=True)
+    # สร้าง overall ranking พร้อม metadata ครบถ้วน
+    db_overall_rank = []
+    for j in range(len(db_labels)):
+        file_meta = db_metadata[j]
+        db_overall_rank.append({
+            "db_doc": db_labels[j],
+            "genre": db_genres[j],
+            "title": db_titles[j],
+            "folder_name": file_meta["folder_name"],
+            "chapter_name": file_meta["chapter_name"],
+            "display_name": file_meta["display_name"],
+            "best_similarity": float(best_by_db[j])
+        })
+    db_overall_rank = sorted(db_overall_rank, key=lambda x: x["best_similarity"], reverse=True)
     # 6.2 Which genres overlap most (by mean/max across inputs)?
     genre_overlap = {}
     for g in sorted(set(db_genres)):
@@ -296,8 +375,12 @@ def run_pipeline(db_root: str, input_root: str, out_root: str,
     if not comp_df.empty:
         comp_df["genre_top3"] = comp_df["genre_rank_json"].apply(top3)
 
-    # Table of per-input per-DB similarities (for heatmap & detailed comparison)
-    sim_df = pd.DataFrame(S, index=in_labels, columns=db_labels)
+    # Table of per-input per-DB similarities with enhanced labels for heatmap
+    # Create display labels for matrix axes
+    db_display_labels = [meta["display_name"] for meta in db_metadata]
+    input_display_labels = [label.replace('.txt', '').replace('_', ' ') for label in in_labels]
+    
+    sim_df = pd.DataFrame(S, index=input_display_labels, columns=db_display_labels)
 
     # 8) Save tables
     comp_csv = os.path.join(out_root, "comparison_table.csv")
@@ -306,23 +389,34 @@ def run_pipeline(db_root: str, input_root: str, out_root: str,
 
     comp_df.to_csv(comp_csv, index=False, encoding="utf-8-sig")
     sim_df.to_csv(sim_csv, encoding="utf-8-sig")
+    # Create analysis_by_input structure (like in the image)
+    analysis_by_input = []
+    for row in rows:
+        analysis_by_input.append({
+            "input_name": row["input_doc"],
+            "input_title": row["input_doc"].replace('.txt', '').replace('_', ' ').title(),
+            "similarities": row["input_similarities"]
+        })
+    
     with open(overall_json, "w", encoding="utf-8") as f:
         json.dump({
+            "analysis_by_input": analysis_by_input,
             "db_overall_rank_desc": "DB doc with highest similarity to any input (descending)",
-            "db_overall_rank": sorted(
-                [{"db_doc": db_labels[j], "genre": db_genres[j], "best_similarity": float(best_by_db[j])}
-                 for j in range(len(db_labels))],
-                key=lambda d: d["best_similarity"], reverse=True
-            ),
+            "db_overall_rank": db_overall_rank,
+            "matrix_labels": {
+                "input_labels": input_display_labels,
+                "db_labels": db_display_labels,
+                "db_metadata": db_metadata
+            },
             "genre_rank_overall_desc": "Genres ranked by max similarity across inputs (then mean)",
             "genre_rank_overall": [
                 {"genre": g, "mean": round(m,4), "max": round(mx,4)} for (g,m,mx) in genre_rank_overall
             ]
         }, f, ensure_ascii=False, indent=2)
 
-    # 9) Visualizations
+    # 9) Visualizations with enhanced labels
     heatmap_path = os.path.join(out_root, "similarity_heatmap.png")
-    plot_heatmap(S, db_labels, in_labels, "Cosine Similarity (Inputs vs Database)", heatmap_path)
+    plot_heatmap(S, db_display_labels, input_display_labels, "Cosine Similarity (Inputs vs Database)", heatmap_path)
 
     network_path = os.path.join(out_root, "network_top_matches.png")
     plot_network(edges, network_path, topk=k_neighbors)
@@ -337,12 +431,12 @@ def run_pipeline(db_root: str, input_root: str, out_root: str,
         lines.append(f"  Top genres: {row['genre_top3']}")
     lines.append("\n## Overall DB ranking (best match across inputs)\n")
     rank_db = sorted(
-        [{"db_doc": db_labels[j], "genre": db_genres[j], "best_similarity": float(best_by_db[j])}
+        [{"db_doc": db_labels[j], "genre": db_genres[j], "title": db_titles[j], "best_similarity": float(best_by_db[j])}
          for j in range(len(db_labels))],
         key=lambda d: d["best_similarity"], reverse=True
     )
     for d in rank_db[:10]:
-        lines.append(f"- {d['db_doc']} (genre={d['genre']}): {d['best_similarity']:.2f}")
+        lines.append(f"- {d['db_doc']} (title={d['title']}, genre={d['genre']}): {d['best_similarity']:.2f}")
     lines.append("\n## Overall Genre overlap ranking\n")
     for g, m, mx in genre_rank_overall:
         lines.append(f"- {g}: max={mx:.2f}, mean={m:.2f}")
