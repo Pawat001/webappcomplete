@@ -1,425 +1,91 @@
-// Simple file upload handler
-(function() {
-  'use strict';
+/**
+ * Novel Similarity Analyzer - Frontend JavaScript
+ * Handles file uploads, API communication, and results display
+ */
+
+// Add CSS styles for visualizations
+var style = document.createElement('style');
+style.textContent = `
+  .heatmap-container img,
+  .network-container img {
+    transition: transform 0.2s ease-out;
+    will-change: transform;
+    transform-origin: center;
+  }
   
-  // State
-  let currentFiles = [];
-  const maxFiles = 5;
-  const apiUrl = window.apiBaseUrl ? window.apiBaseUrl + '/api/analyze' : 'http://localhost:8000/api/analyze';
-
-  // Elements
-  const form = document.getElementById('analysisForm');
-  const fileInput = document.getElementById('inputFiles');
-  const dbInput = document.getElementById('databaseFile');
-  const fileList = document.getElementById('fileList');
-  const dbLabel = document.getElementById('databaseLabel');
-
-  // File input change
-  if (fileInput) {
-    fileInput.addEventListener('change', function(e) {
-      const files = e.target.files;
-      if (!files || files.length === 0) return;
-
-      if (files.length > maxFiles) {
-        alert('Maximum ' + maxFiles + ' files allowed');
-        e.target.value = '';
-        return;
-      }
-
-      currentFiles = Array.from(files);
-      updateFileList();
-    });
+  .tooltip {
+    pointer-events: none;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    max-width: 300px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    background-color: rgba(0, 0, 0, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    padding: 0.75rem 1rem;
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+    line-height: 1.4;
+    z-index: 50;
   }
+`;
+document.head.appendChild(style);
 
-  // Database file change  
-  if (dbInput) {
-    dbInput.addEventListener('change', function(e) {
-      const file = e.target.files[0];
-      if (!file) return;
-
-      if (!file.name.endsWith('.zip')) {
-        alert('Please select a .zip file');
-        e.target.value = '';
-        return;
-      }
-
-      if (dbLabel) {
-        dbLabel.textContent = file.name;
-      }
-    });
-  }
-
-  // Form submit
-  if (form) {
-    form.addEventListener('submit', async function(e) {
-      e.preventDefault();
-
-      if (!currentFiles || currentFiles.length === 0) {
-        alert('Please select files to analyze');
-        return;
-      }
-
-      const dbFile = dbInput.files[0];
-      if (!dbFile) {
-        alert('Please select a database file');
-        return;
-      }
-
-      const btn = this.querySelector('button[type="submit"]');
-      if (btn) {
-        btn.disabled = true;
-        btn.textContent = 'Uploading...';
-      }
-
-      try {
-        const formData = new FormData();
-        currentFiles.forEach(f => formData.append('files', f));
-        formData.append('database', dbFile);
-
-        const response = await fetch(apiUrl, {
-          method: 'POST',
-          body: formData
-        });
-
-        const result = await response.json();
-        console.log('Upload result:', result);
-        
-        if (result.error) throw new Error(result.error);
-        alert('Upload successful!');
-
-      } catch (err) {
-        console.error('Upload failed:', err);
-        alert('Upload failed: ' + err.message);
-      
-      } finally {
-        if (btn) {
-          btn.disabled = false;
-          btn.textContent = 'Analyze';
+class NovelSimilarityAnalyzer {
+  constructor() {
+    // Load Plotly.js for interactive visualizations
+    if (!window.Plotly) {
+      var self = this;
+      var script = document.createElement('script');
+      script.src = 'https://cdn.plot.ly/plotly-2.27.0.min.js';
+      script.onload = function() {
+        console.log('Plotly.js loaded successfully');
+        self.plotlyLoaded = true;
+        // Re-render any pending visualizations after Plotly loads
+        if (self.pendingHeatmap) {
+          self.renderHeatmap(self.pendingHeatmap.plotId, self.pendingHeatmap.data);
         }
-      }
-    });
-  }
+        if (self.pendingNetwork) {
+          self.renderNetwork(self.pendingNetwork.plotId, self.pendingNetwork.data);
+        }
+      };
+      document.head.appendChild(script);
+    } else {
+      this.plotlyLoaded = true;
+    }
 
-  // Update file list display
-  function updateFileList() {
-    if (!fileList || !currentFiles) return;
-
-    fileList.innerHTML = currentFiles
-      .map((file, i) => `
-        <div class="flex items-center justify-between p-2 bg-gray-50 rounded mb-2">
-          <span class="text-gray-700">${file.name}</span>
-          <button type="button" class="text-red-600 hover:text-red-800" data-index="${i}">×</button>
-        </div>
-      `)
-      .join('');
-
-    // Add remove handlers
-    fileList.querySelectorAll('button[data-index]').forEach(btn => {
-      btn.addEventListener('click', function() {
-        const idx = parseInt(this.dataset.index, 10);
-        removeFile(idx);
-      });
-    });
-  }
-
-  // Remove file
-  function removeFile(index) {
-    if (!currentFiles) return;
+    // Create tooltip element
+    this.tooltip = document.createElement('div');
+    this.tooltip.className = 'fixed hidden z-40 bg-black bg-opacity-90 text-white px-3 py-2 rounded-lg text-sm max-w-xs';
+    document.body.appendChild(this.tooltip);
     
-    currentFiles = currentFiles.filter((_, i) => i !== index);
-    updateFileList();
-    
-    // Update file input
-    if (fileInput) {
-      const dt = new DataTransfer();
-      currentFiles.forEach(f => dt.items.add(f));
-      fileInput.files = dt.files;
-    }
-  }
-
-});
-  init() {
-    this.currentFiles = null;
-    this.maxInputFiles = 5;
-    this.apiBaseUrl = 'http://localhost:8000';
-    this.initializeEventListeners();
-  },
-
-  initializeEventListeners() {
-    const form = document.getElementById('analysisForm');
-    if (form) {
-      form.addEventListener('submit', (e) => this.handleFormSubmit(e));
+    // Load Chart.js if not already loaded
+    if (!window.Chart) {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/chart.js';
+      var self = this;
+      script.onload = function() {
+        console.log('Chart.js loaded successfully');
+        self.initializeCharts();
+      };
+      document.head.appendChild(script);
     }
 
-    const inputFiles = document.getElementById('inputFiles');
-    if (inputFiles) {
-      inputFiles.addEventListener('change', (e) => this.handleInputFilesChange(e));
+    // Auto-detect backend URL based on current environment
+    const currentHost = window.location.hostname;
+    if (currentHost.includes('e2b.dev')) {
+      // E2B sandbox environment - use public URL
+      this.apiBaseUrl = 'https://' + currentHost.replace('3000-', '8000-');
+    } else if (currentHost === 'localhost') {
+      // Local development - use backend URL directly
+      this.apiBaseUrl = 'http://localhost:8000';
+    } else {
+      // Production - use relative path without /api prefix
+      this.apiBaseUrl = '';
     }
-
-    const databaseFile = document.getElementById('databaseFile');
-    if (databaseFile) {
-      databaseFile.addEventListener('change', (e) => this.handleDatabaseFileChange(e)); 
-    }
-  },
-
-  handleInputFilesChange(event) {
-    try {
-      const files = event.target.files;
-      if (!files) return;
-      
-      const fileArray = Array.from(files);
-      if (fileArray.length > this.maxInputFiles) {
-        alert('Maximum ' + this.maxInputFiles + ' files allowed');
-        event.target.value = ''; 
-        return;
-      }
-
-      this.currentFiles = fileArray;
-      this.updateFileList();
-    } catch (error) {
-      console.error('Error handling input files:', error);
-    }
-  },
-
-  handleDatabaseFileChange(event) {
-    try {
-      const file = event.target.files[0];
-      if (!file) return;
-
-      if (!file.name.endsWith('.zip')) {
-        alert('Please select a .zip file');
-        event.target.value = '';
-        return; 
-      }
-
-      const databaseLabel = document.getElementById('databaseLabel');
-      if (databaseLabel) {
-        databaseLabel.textContent = file.name;
-      }
-    } catch (error) {
-      console.error('Error handling database file:', error);
-    }
-  },
-
-  handleFormSubmit(event) {
-    event.preventDefault();
-    
-    if (!this.currentFiles || this.currentFiles.length === 0) {
-      alert('Please select input files');
-      return;
-    }
-
-    const databaseFile = document.getElementById('databaseFile').files[0];
-    if (!databaseFile) {
-      alert('Please select a database file');
-      return;
-    }
-
-    const formData = new FormData();
-    this.currentFiles.forEach(file => {
-      formData.append('files', file);
-    });
-    formData.append('database', databaseFile);
-
-    // Show loading state
-    const submitBtn = document.querySelector('button[type="submit"]');
-    if (submitBtn) {
-      submitBtn.disabled = true;
-      submitBtn.textContent = 'Uploading...';
-    }
-
-    // Submit the form
-    fetch(this.apiBaseUrl + '/api/analyze', {
-      method: 'POST',
-      body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
-      console.log('Success:', data);
-      if (submitBtn) {
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Analyze';
-      }
-      alert('Upload successful!');
-    })
-    .catch(error => {
-      console.error('Error:', error);
-      if (submitBtn) {
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Analyze';
-      }
-      alert('Error submitting form');
-    });
-  },
-
-  updateFileList() {
-    const fileList = document.getElementById('fileList');
-    if (!fileList) return;
-
-    fileList.innerHTML = this.currentFiles.map((file, index) => `
-      <div class="flex items-center justify-between p-2 bg-gray-50 rounded mb-2">
-        <span class="text-gray-700">${file.name}</span>
-        <button type="button" class="text-red-600 hover:text-red-800" data-index="${index}">
-          ×
-        </button>
-      </div>
-    `).join('');
-
-    // Add remove handlers
-    fileList.querySelectorAll('button[data-index]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const index = parseInt(btn.dataset.index);
-        this.currentFiles.splice(index, 1);
-        this.updateFileList();
-      });
-    });
-  }
-};
-
-// Initialize the app
-window.addEventListener('DOMContentLoaded', () => {
-  uploadApp.init();
-});
-  constructor() {
-    this.currentFiles = null;
-    this.maxInputFiles = 5;
-    this.apiBaseUrl = 'http://localhost:8000';
-    this.initializeEventListeners();
-  }
-
-  initializeEventListeners() {
-    const form = document.getElementById('analysisForm');
-    if (form) {
-      form.addEventListener('submit', (e) => this.handleFormSubmit(e));
-    }
-
-    const inputFiles = document.getElementById('inputFiles');
-    if (inputFiles) {
-      inputFiles.addEventListener('change', (e) => this.handleInputFilesChange(e));
-    }
-
-    const databaseFile = document.getElementById('databaseFile');
-    if (databaseFile) {
-      databaseFile.addEventListener('change', (e) => this.handleDatabaseFileChange(e));
-    }
-  }
-
-  handleInputFilesChange(event) {
-    try {
-      const files = event.target.files;
-      if (!files) return;
-      
-      const fileArray = Array.from(files);
-      if (fileArray.length > this.maxInputFiles) {
-        alert('Maximum ' + this.maxInputFiles + ' files allowed');
-        event.target.value = '';
-        return;
-      }
-
-      this.currentFiles = fileArray;
-      this.updateFileList();
-    } catch (error) {
-      console.error('Error handling input files:', error);
-    }
-  }
-
-  handleDatabaseFileChange(event) {
-    try {
-      const file = event.target.files[0];
-      if (!file) return;
-
-      if (!file.name.endsWith('.zip')) {
-        alert('Please select a .zip file');
-        event.target.value = '';
-        return;
-      }
-
-      const databaseLabel = document.getElementById('databaseLabel');
-      if (databaseLabel) {
-        databaseLabel.textContent = file.name;
-      }
-    } catch (error) {
-      console.error('Error handling database file:', error);
-    }
-  }
-
-  handleFormSubmit(event) {
-    event.preventDefault();
-    
-    if (!this.currentFiles || this.currentFiles.length === 0) {
-      alert('Please select input files');
-      return;
-    }
-
-    const databaseFile = document.getElementById('databaseFile').files[0];
-    if (!databaseFile) {
-      alert('Please select a database file');
-      return;
-    }
-
-    const formData = new FormData();
-    this.currentFiles.forEach(file => {
-      formData.append('files', file);
-    });
-    formData.append('database', databaseFile);
-
-    // Show loading state
-    const submitBtn = document.querySelector('button[type="submit"]');
-    if (submitBtn) {
-      submitBtn.disabled = true;
-      submitBtn.textContent = 'Uploading...';
-    }
-
-    // Submit the form
-    fetch(this.apiBaseUrl + '/api/analyze', {
-      method: 'POST',
-      body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
-      console.log('Success:', data);
-      if (submitBtn) {
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Analyze';
-      }
-    })
-    .catch(error => {
-      console.error('Error:', error);
-      if (submitBtn) {
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Analyze';
-      }
-      alert('Error submitting form');
-    });
-  }
-
-  updateFileList() {
-    const fileList = document.getElementById('fileList');
-    if (!fileList) return;
-
-    fileList.innerHTML = this.currentFiles.map((file, index) => `
-      <div class="flex items-center justify-between p-2 bg-gray-50 rounded mb-2">
-        <span class="text-gray-700">${file.name}</span>
-        <button type="button" class="text-red-600 hover:text-red-800" data-index="${index}">
-          ×
-        </button>
-      </div>
-    `).join('');
-
-    // Add remove handlers
-    fileList.querySelectorAll('button[data-index]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const index = parseInt(btn.dataset.index);
-        this.currentFiles.splice(index, 1);
-        this.updateFileList();
-      });
-    });
-  }
-}
-  constructor() {
-    this.currentFiles = null;
-    this.maxInputFiles = 5;
-    this.apiBaseUrl = 'http://localhost:8000';
+    // If a runtime API base URL was injected (dev), prefer it
+    if (typeof window !== 'undefined' && window.apiBaseUrl !== undefined) {
       this.apiBaseUrl = window.apiBaseUrl;
     }
 
@@ -428,237 +94,137 @@ window.addEventListener('DOMContentLoaded', () => {
     this.currentFiles = null;
     this.folderFiles = null;
     this.maxInputFiles = 5;
-
-    // Ensure all required methods exist
-    const requiredMethods = [
-      'handleFormSubmit',
-      'handleInputFilesChange', 
-      'handleFolderChange',
-      'handleDatabaseFileChange',
-      'handleNovelNamesChange',
-      'removeFileItem',
-      'downloadResults',
-      'startNewAnalysis',
-      'openImageModal',
-      'zoomInNetwork',
-      'zoomOutNetwork',
-      'resetNetworkZoom',
-      'showNetworkTooltip',
-      'hideTooltip'
-    ];
-
-    requiredMethods.forEach(method => {
-      if (typeof this[method] !== 'function') {
-        console.error(`Required method ${method} is not defined`);
-      }
-    });
     
     this.initializeEventListeners();
   }
 
   initializeEventListeners() {
-    try {
-      // Bind core file upload handlers
-      this.handleFormSubmit = this.handleFormSubmit.bind(this);
-      this.handleInputFilesChange = this.handleInputFilesChange.bind(this);
-      this.handleDatabaseFileChange = this.handleDatabaseFileChange.bind(this);
+    // Form submission
+    const form = document.getElementById('analysisForm');
+    if (form) {
+      var self = this;
+      form.addEventListener('submit', function(e) { self.handleFormSubmit(e); });
+    }
 
-      // Form submission
-      const form = document.getElementById('analysisForm');
-      if (form) {
-        form.addEventListener('submit', this.handleFormSubmit);
-      }
+    // File input dropzones
+    this.setupDropzone('inputFilesDropzone', 'inputFiles', true);
+    this.setupDropzone('databaseDropzone', 'databaseFile', false);
 
-      // File input dropzones
-      this.setupDropzone('inputFilesDropzone', 'inputFiles', true);
-      this.setupDropzone('databaseDropzone', 'databaseFile', false);
+    // File selection buttons
+    const selectFilesBtn = document.getElementById('selectFilesBtn');
+    if (selectFilesBtn) {
+      selectFilesBtn.addEventListener('click', function() {
+        document.getElementById('inputFiles').click();
+      });
+    }
 
-      // File selection buttons
-      const selectFilesBtn = document.getElementById('selectFilesBtn');
-      if (selectFilesBtn) {
-        selectFilesBtn.addEventListener('click', () => {
-          const inputFiles = document.getElementById('inputFiles');
-          if (inputFiles) inputFiles.click();
-        });
-      }
+    const selectFolderBtn = document.getElementById('selectFolderBtn');
+    if (selectFolderBtn) {
+      selectFolderBtn.addEventListener('click', function() {
+        document.getElementById('inputFolder').click();
+      });
+    }
 
-      const selectFolderBtn = document.getElementById('selectFolderBtn');
-      if (selectFolderBtn) {
-        selectFolderBtn.addEventListener('click', () => {
-          const inputFolder = document.getElementById('inputFolder');
-          if (inputFolder) inputFolder.click();
-        });
-      }
+    // File input change handlers
+    const inputFiles = document.getElementById('inputFiles');
+    if (inputFiles) {
+      var self = this;
+      inputFiles.addEventListener('change', function(e) { self.handleInputFilesChange(e); });
+    }
 
-      // File input change handlers
-      const inputFiles = document.getElementById('inputFiles');
-      if (inputFiles) {
-        inputFiles.addEventListener('change', this.handleInputFilesChange);
-      }
+    const inputFolder = document.getElementById('inputFolder');
+    if (inputFolder) {
+      var self = this;
+      inputFolder.addEventListener('change', function(e) { self.handleFolderChange(e); });
+    }
 
-      const inputFolder = document.getElementById('inputFolder');
-      if (inputFolder) {
-        inputFolder.addEventListener('change', this.handleFolderChange);
-      }
+    const databaseFile = document.getElementById('databaseFile');
+    if (databaseFile) {
+      var self = this;
+      databaseFile.addEventListener('change', function(e) { self.handleDatabaseFileChange(e); });
+    }
 
-      const databaseFile = document.getElementById('databaseFile');
-      if (databaseFile) {
-        databaseFile.addEventListener('change', this.handleDatabaseFileChange);
-      }
-
-      // Novel names input
-      const novelNames = document.getElementById('novelNames');
-      if (novelNames) {
-        novelNames.addEventListener('input', this.handleNovelNamesChange);
-      }
-
-      // Result buttons
-      const downloadBtn = document.getElementById('downloadResultsBtn');
-      if (downloadBtn) {
-        downloadBtn.addEventListener('click', this.downloadResults);
-      }
-
-      const startNewBtn = document.getElementById('startNewBtn');
-      if (startNewBtn) {
-        startNewBtn.addEventListener('click', this.startNewAnalysis);
-      }
-
-      console.log('Event listeners initialized successfully');
-    } catch (error) {
-      console.error('Error initializing event listeners:', error);
+    // Novel names input
+    const novelNames = document.getElementById('novelNames');
+    if (novelNames) {
+      var self = this;
+      novelNames.addEventListener('input', function(e) { self.handleNovelNamesChange(e); });
     }
   }
 
   setupDropzone(dropzoneId, inputId, multiple = false) {
-    try {
-      const dropzone = document.getElementById(dropzoneId);
-      const input = document.getElementById(inputId);
+    var dropzone = document.getElementById(dropzoneId);
+    var input = document.getElementById(inputId);
+    var self = this;
 
-      if (!dropzone || !input) {
-        console.warn(`Dropzone setup failed: ${dropzoneId} or ${inputId} not found`);
-        return;
-      }
+    if (!dropzone || !input) return;
 
-      // Click to select files
-      dropzone.addEventListener('click', () => input.click());
+    // Click to select files
+    dropzone.addEventListener('click', function() { input.click(); });
 
-      // Drag and drop events with bound context
-      dropzone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        dropzone.classList.add('dropzone-active');
-      });
+    // Drag and drop events
+    dropzone.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      dropzone.classList.add('dropzone-active');
+    });
 
-      dropzone.addEventListener('dragleave', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        dropzone.classList.remove('dropzone-active');
-      });
+    dropzone.addEventListener('dragleave', function(e) {
+      e.preventDefault();
+      dropzone.classList.remove('dropzone-active');
+    });
 
-      dropzone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        dropzone.classList.remove('dropzone-active');
-        
-        const files = e.dataTransfer.files;
-        if (files.length > 0) {
-          if (multiple && files.length > this.maxInputFiles) {
-            this.showAlert(`สามารถอัปโหลดได้สูงสุด ${this.maxInputFiles} ไฟล์`, 'error');
-            return;
-          }
-          
-          try {
-            // Create a new FileList-like object
-            const dataTransfer = new DataTransfer();
-            Array.from(files).forEach(file => dataTransfer.items.add(file));
-            
-            // Update file input and trigger change event
-            input.files = dataTransfer.files;
-            const event = new Event('change', { bubbles: true });
-            input.dispatchEvent(event);
-          } catch (error) {
-            console.error('Error handling dropped files:', error);
-            this.showAlert('เกิดข้อผิดพลาดในการอัปโหลดไฟล์ กรุณาลองใหม่อีกครั้ง', 'error');
-          }
+    dropzone.addEventListener('drop', function(e) {
+      e.preventDefault();
+      dropzone.classList.remove('dropzone-active');
+      
+      var files = e.dataTransfer.files;
+      if (files.length > 0) {
+        if (multiple && files.length > self.maxInputFiles) {
+          self.showAlert('สามารถอัปโหลดได้สูงสุด ' + self.maxInputFiles + ' ไฟล์', 'error');
+          return;
         }
-      });
-
-      console.log(`Dropzone ${dropzoneId} initialized successfully`);
-    } catch (error) {
-      console.error(`Error setting up dropzone ${dropzoneId}:`, error);
-    }
+        
+        // Update file input
+        input.files = files;
+        
+        // Trigger change event
+        var event = new Event('change', { bubbles: true });
+        input.dispatchEvent(event);
+      }
+    });
   }
 
   handleInputFilesChange(event) {
-    try {
-      if (!event.target || !event.target.files) {
-        console.error('Invalid event or missing files in handleInputFilesChange');
-        return;
-      }
-      
-      const files = Array.from(event.target.files);
-      console.log('📄 Input files detected:', files.length);
-      
-      if (files.length > this.maxInputFiles) {
-        this.showAlert(`สามารถอัปโหลดได้สูงสุด ${this.maxInputFiles} ไฟล์`, 'error');
-        event.target.value = ''; // Clear the input
-        return;
-      }
-      
-      this.displaySelectedFiles(files, 'files');
-    } catch (error) {
-      console.error('Error handling input files:', error);
-      this.showAlert('เกิดข้อผิดพลาดในการอัปโหลดไฟล์ กรุณาลองใหม่อีกครั้ง', 'error');
-    }
+    var files = [].slice.call(event.target.files);
+    this.displaySelectedFiles(files, 'files');
   }
 
   handleFolderChange(event) {
-    try {
-      if (!event.target || !event.target.files) {
-        console.error('Invalid event or missing files in handleFolderChange');
-        return;
-      }
+    var files = [].slice.call(event.target.files);
+    
+    console.log('📁 Folder files detected:', files.length);
+    
+    // Filter only supported file types and log details
+    const supportedFiles = files.filter(file => {
+      const ext = file.name.toLowerCase().split('.').pop();
+      const isSupported = ['txt', 'docx', 'pdf'].includes(ext);
       
-      const files = Array.from(event.target.files);
-      console.log('📁 Folder files detected:', files.length);
+      console.log('📄 File: ' + file.name + ', Path: ' + file.webkitRelativePath + ', Supported: ' + isSupported);
       
-      // Filter only supported file types and log details
-      const supportedFiles = files.filter(file => {
-        try {
-          const ext = file.name.toLowerCase().split('.').pop();
-          const isSupported = ['txt', 'docx', 'pdf'].includes(ext);
-          
-          console.log(`📄 File: ${file.name}, Path: ${file.webkitRelativePath}, Supported: ${isSupported}`);
-          
-          return isSupported;
-        } catch (error) {
-          console.error('Error checking file:', file.name, error);
-          return false;
-        }
-      });
-      
-      console.log('✅ Supported files:', supportedFiles.length);
-      
-      if (supportedFiles.length === 0) {
-        this.showAlert('ไม่พบไฟล์ที่รองรับในโฟลเดอร์ (.txt, .docx, .pdf)', 'warning');
-        event.target.value = ''; // Clear the input
-        return;
-      }
-      
-      if (supportedFiles.length > this.maxInputFiles) {
-        this.showAlert(`พบไฟล์ที่รองรับเกิน ${this.maxInputFiles} ไฟล์ กรุณาเลือกโฟลเดอร์ที่มีไฟล์น้อยกว่านี้`, 'error');
-        event.target.value = ''; // Clear the input
-        return;
-      }
-      
-      // Store original files with webkitRelativePath for backend
-      this.folderFiles = supportedFiles;
-      
-      this.displaySelectedFiles(supportedFiles, 'folder');
-    } catch (error) {
-      console.error('Error handling folder input:', error);
-      this.showAlert('เกิดข้อผิดพลาดในการอ่านโฟลเดอร์ กรุณาลองใหม่อีกครั้ง', 'error');
+      return isSupported;
+    });
+    
+    console.log('✅ Supported files:', supportedFiles.length);
+    
+    if (supportedFiles.length === 0) {
+      this.showAlert('ไม่พบไฟล์ที่รองรับในโฟลเดอร์ (.txt, .docx, .pdf)', 'warning');
+      return;
     }
+    
+    // Store original files with webkitRelativePath for backend
+    this.folderFiles = supportedFiles;
+    
+    this.displaySelectedFiles(supportedFiles, 'folder');
   }
 
   displaySelectedFiles(files, source) {
@@ -778,7 +344,7 @@ window.addEventListener('DOMContentLoaded', () => {
         <span class="text-green-600 text-sm">
           <i class="fas fa-check-circle"></i> Ready
         </span>
-        <button type="button" class="text-red-600 hover:text-red-800 remove-file-btn" data-index="${index}">
+        <button type="button" class="text-red-600 hover:text-red-800" onclick="analyzer.removeFileItem(${index})">
           <i class="fas fa-times"></i>
         </button>
       </div>
@@ -1118,11 +684,11 @@ window.addEventListener('DOMContentLoaded', () => {
             ผลการวิเคราะห์
           </h2>
           <div class="flex space-x-3">
-            <button id="downloadResultsBtn" class="download-btn">
+            <button onclick="analyzer.downloadResults()" class="download-btn">
               <i class="fas fa-download"></i>
               ดาวน์โหลดผลลัพธ์
             </button>
-            <button id="startNewBtn" class="bg-gray-600 hover:bg-gray-700 text-white font-medium py-2 px-4 rounded-lg">
+            <button onclick="analyzer.startNewAnalysis()" class="bg-gray-600 hover:bg-gray-700 text-white font-medium py-2 px-4 rounded-lg">
               <i class="fas fa-plus mr-2"></i>
               วิเคราะห์ใหม่
             </button>
@@ -1159,7 +725,9 @@ window.addEventListener('DOMContentLoaded', () => {
     if (!rankingData || !rankingData.content) return '';
     
     try {
-      const data = JSON.parse(rankingData.content);
+      // --- FIXED ---
+      const data = rankingData.content;
+      // --- END FIX ---
       console.log('Parsed analysis data:', data);
 
       if (!data.analysis_by_input || !Array.isArray(data.analysis_by_input)) {
@@ -1292,178 +860,58 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 
   generateComparisonTableCard(tableData) {
-    try {
-      if (!tableData || !tableData.content) return '';
-      
-      // Parse CSV content
-      const lines = tableData.content.split('\n');
-      if (lines.length < 2) return '';
-      
-      const headers = lines[0].split(',');
-      const rows = lines.slice(1).filter(line => line.trim()).map(line => {
-        const values = line.split(',');
-        return headers.reduce((obj, header, i) => {
-          obj[header] = values[i];
-          return obj;
-        }, {});
-      });
-      
-      // Generate table HTML
-      const tableRows = rows.map(row => `
-        <tr class="hover:bg-gray-50">
-          <td class="px-4 py-3">
-            <div class="font-medium">${row.input_doc || ''}</div>
-          </td>
-          <td class="px-4 py-3">
-            <div>${row.top_db_doc || ''}</div>
-          </td>
-          <td class="px-4 py-3 text-center">
-            <div class="font-bold ${row.top_similarity >= 0.9 ? 'text-red-600' : row.top_similarity >= 0.6 ? 'text-yellow-600' : 'text-blue-600'}">
-              ${Math.round((row.top_similarity || 0) * 100)}%
-            </div>
-          </td>
-          <td class="px-4 py-3">
-            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-              ${row.relation === 'duplicate' ? 'bg-red-100 text-red-800' : 
-                row.relation === 'similar' ? 'bg-yellow-100 text-yellow-800' : 
-                'bg-blue-100 text-blue-800'}">
-              ${row.relation || ''}
-            </span>
-          </td>
-        </tr>
-      `).join('');
-
-      return `
-        <div class="result-card">
-          <h3><i class="fas fa-table"></i>📋 ตารางเปรียบเทียบ (Comparison Table)</h3>
-          <div class="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-4">
-            <p class="text-purple-800 text-sm">
-              <i class="fas fa-info-circle mr-2"></i>
-              <strong>คำอธิบาย:</strong> ตารางนี้แสดงผลการเปรียบเทียบโดยละเอียดของแต่ละไฟล์อินพุต รวมถึงเอกสารที่คล้ายคลึงที่สุด (top_db_doc) 
-              คะแนนความคล้าย (top_similarity) และการจัดประเภทความสัมพันธ์ (relation: duplicate/similar/different)
-            </p>
-          </div>
-          <div class="overflow-x-auto">
-            <table class="w-full border border-gray-200 rounded-lg shadow-sm">
-              <thead class="bg-gradient-to-r from-gray-50 to-purple-50">
-                <tr>
-                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ไฟล์อินพุต</th>
-                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">เอกสารที่คล้ายที่สุด</th>
-                  <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">ความคล้าย</th>
-                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ความสัมพันธ์</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-gray-200">
-                ${tableRows}
-              </tbody>
-            </table>
-          </div>
-          ${tableData.url ? `<a href="${this.apiBaseUrl ? this.apiBaseUrl + tableData.url : tableData.url}" download class="download-btn mt-4"><i class="fas fa-download"></i>ดาวน์โหลด CSV</a>` : ''}
+    if (!tableData) return '';
+    
+    return `
+      <div class="result-card">
+        <h3><i class="fas fa-table"></i>📋 ตารางเปรียบเทียบ (Comparison Table)</h3>
+        <div class="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-4">
+          <p class="text-purple-800 text-sm">
+            <i class="fas fa-info-circle mr-2"></i>
+            <strong>คำอธิบาย:</strong> ตารางนี้แสดงผลการเปรียบเทียบโดยละเอียดของแต่ละไฟล์อินพุต รวมถึงเอกสารที่คล้ายคลึงที่สุด (top_db_doc) 
+            คะแนนความคล้าย (top_similarity) และการจัดประเภทความสัมพันธ์ (relation: duplicate/similar/different)
+          </p>
         </div>
-      `;
-    } catch (error) {
-      console.error('Error generating comparison table:', error);
-      return `
-        <div class="result-card">
-          <h3><i class="fas fa-exclamation-triangle"></i>⚠️ ตารางเปรียบเทียบ (Comparison Table)</h3>
-          <div class="bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg">
-            <p><i class="fas fa-exclamation-circle"></i> เกิดข้อผิดพลาดในการแสดงผลข้อมูลตาราง</p>
-            <p class="text-sm mt-2">กรุณาลองโหลดข้อมูลใหม่อีกครั้ง</p>
+        <div class="overflow-x-auto">
+          <div id="comparisonTableContainer" class="bg-gray-50 rounded-lg p-4">
+            <p class="text-gray-600">กำลังโหลดข้อมูลตาราง...</p>
           </div>
-          ${tableData.url ? `<a href="${this.apiBaseUrl ? this.apiBaseUrl + tableData.url : tableData.url}" download class="download-btn mt-4"><i class="fas fa-download"></i>ดาวน์โหลด CSV</a>` : ''}
         </div>
-      `;
-    }
+        ${tableData.url ? `<a href="${this.apiBaseUrl ? this.apiBaseUrl + tableData.url : tableData.url}" download class="download-btn mt-4"><i class="fas fa-download"></i>ดาวน์โหลด CSV</a>` : ''}
+      </div>
+    `;
   }
 
   generateSimilarityMatrixCard(matrixData) {
-    try {
-      if (!matrixData || !matrixData.content) return '';
-      
-      // Parse CSV content
-      const lines = matrixData.content.split('\n');
-      if (lines.length < 2) return '';
-      
-      // First row contains column headers (database files)
-      const dbFiles = lines[0].split(',').slice(1);  // Skip first empty cell
-      const matrix = [];
-      const inputFiles = [];
-      
-      // Process each row
-      lines.slice(1).forEach(line => {
-        if (!line.trim()) return;
-        const parts = line.split(',');
-        inputFiles.push(parts[0]);  // First column is input file name
-        matrix.push(parts.slice(1).map(Number));  // Rest are similarity scores
-      });
-
-      // Generate matrix table HTML
-      const tableRows = inputFiles.map((inputFile, i) => `
-        <tr class="hover:bg-gray-50">
-          <td class="px-4 py-2 font-medium text-gray-700 whitespace-nowrap">${inputFile}</td>
-          ${matrix[i].map(score => `
-            <td class="px-4 py-2 text-center">
-              <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                ${score >= 0.9 ? 'bg-red-100 text-red-800' :
-                  score >= 0.6 ? 'bg-yellow-100 text-yellow-800' :
-                  'bg-blue-100 text-blue-800'}">
-                ${Math.round(score * 100)}%
-              </span>
-            </td>
-          `).join('')}
-        </tr>
-      `).join('');
-
-      return `
-        <div class="result-card">
-          <h3><i class="fas fa-th"></i>📊 เมทริกซ์ความคล้ายคลึง (Similarity Matrix)</h3>
-          <div class="bg-orange-50 border border-orange-200 rounded-lg p-4 mb-4">
-            <p class="text-orange-800 text-sm">
-              <i class="fas fa-info-circle mr-2"></i>
-              <strong>คำอธิบาย:</strong> เมทริกซ์นี้แสดงคะแนนความคล้ายคลึง (Cosine Similarity) ระหว่างไฟล์อินพุตกับเอกสารทุกตัวในฐานข้อมูล 
-              ค่าใกล้ 1 = คล้ายคลึงมาก, ค่าใกล้ 0 = แตกต่างมาก
-            </p>
-          </div>
-          <div class="overflow-x-auto">
-            <table class="w-full border border-gray-200 rounded-lg shadow-sm">
-              <thead class="bg-gradient-to-r from-gray-50 to-orange-50">
-                <tr>
-                  <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ไฟล์อินพุต</th>
-                  ${dbFiles.map(file => `
-                    <th class="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
-                      ${file}
-                    </th>
-                  `).join('')}
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-gray-200">
-                ${tableRows}
-              </tbody>
-            </table>
-          </div>
-          ${matrixData.url ? `<a href="${this.apiBaseUrl ? this.apiBaseUrl + matrixData.url : matrixData.url}" download class="download-btn mt-4"><i class="fas fa-download"></i>ดาวน์โหลด CSV</a>` : ''}
+    if (!matrixData) return '';
+    
+    return `
+      <div class="result-card">
+        <h3><i class="fas fa-th"></i>📊 เมทริกซ์ความคล้ายคลึง (Similarity Matrix)</h3>
+        <div class="bg-orange-50 border border-orange-200 rounded-lg p-4 mb-4">
+          <p class="text-orange-800 text-sm">
+            <i class="fas fa-info-circle mr-2"></i>
+            <strong>คำอธิบาย:</strong> เมทริกซ์นี้แสดงคะแนนความคล้ายคลึง (Cosine Similarity) ระหว่างไฟล์อินพุตกับเอกสารทุกตัวในฐานข้อมูล 
+            ค่าใกล้ 1 = คล้ายคลึงมาก, ค่าใกล้ 0 = แตกต่างมาก
+          </p>
         </div>
-      `;
-    } catch (error) {
-      console.error('Error generating similarity matrix:', error);
-      return `
-        <div class="result-card">
-          <h3><i class="fas fa-exclamation-triangle"></i>⚠️ เมทริกซ์ความคล้ายคลึง (Similarity Matrix)</h3>
-          <div class="bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg">
-            <p><i class="fas fa-exclamation-circle"></i> เกิดข้อผิดพลาดในการแสดงผลข้อมูลเมทริกซ์</p>
-            <p class="text-sm mt-2">กรุณาลองโหลดข้อมูลใหม่อีกครั้ง</p>
+        <div class="overflow-x-auto">
+          <div id="similarityMatrixContainer" class="bg-gray-50 rounded-lg p-4">
+            <p class="text-gray-600">กำลังโหลดข้อมูลเมทริกซ์...</p>
           </div>
-          ${matrixData.url ? `<a href="${this.apiBaseUrl ? this.apiBaseUrl + matrixData.url : matrixData.url}" download class="download-btn mt-4"><i class="fas fa-download"></i>ดาวน์โหลด CSV</a>` : ''}
         </div>
-      `;
-    }
+        ${matrixData.url ? `<a href="${this.apiBaseUrl ? this.apiBaseUrl + matrixData.url : matrixData.url}" download class="download-btn mt-4"><i class="fas fa-download"></i>ดาวน์โหลด CSV</a>` : ''}
+      </div>
+    `;
   }
 
   generateOverallRankingCard(rankingData) {
     if (!rankingData) return '';
     
     try {
-      const data = rankingData.content ? JSON.parse(rankingData.content) : null;
+      // --- FIXED ---
+      const data = rankingData.content ? rankingData.content : null;
+      // --- END FIX ---
       if (!data) return '';
       
       // Generate top 3 summary cards
@@ -1582,12 +1030,10 @@ window.addEventListener('DOMContentLoaded', () => {
         <div class="result-card">
           <h3><i class="fas fa-trophy"></i>🏆 การจัดอันดับโดยรวม (Overall Ranking)</h3>
           
-          <!-- Summary Cards -->
           <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
             ${summaryCards}
           </div>
           
-          <!-- Analysis Info -->
           ${data.analysis_info ? `
             <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
               <h4 class="font-semibold text-blue-800 mb-2">📊 ข้อมูลการวิเคราะห์</h4>
@@ -1605,26 +1051,15 @@ window.addEventListener('DOMContentLoaded', () => {
           ${rankingData.url ? `<a href="${this.apiBaseUrl ? this.apiBaseUrl + rankingData.url : rankingData.url}" download class="download-btn mt-4"><i class="fas fa-download"></i>ดาวน์โหลด JSON แบบเต็ม</a>` : ''}
         </div>
       `;
-    } catch (error) {
-      console.error('Error generating overall ranking card:', error);
-      return `
-        <div class="result-card">
-          <h3><i class="fas fa-exclamation-triangle"></i>⚠️ การจัดอันดับโดยรวม</h3>
-          <div class="bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg">
-            <p><i class="fas fa-exclamation-circle"></i> เกิดข้อผิดพลาดในการแสดงผลข้อมูลการจัดอันดับ</p>
-            <p class="text-sm mt-2">กรุณาลองโหลดข้อมูลใหม่อีกครั้ง</p>
-          </div>
-        </div>
-      `;
-    }
-      `;
       
     } catch (error) {
       console.error('Error parsing ranking data:', error);
-      return '<div class="result-card">' +
-        '<h3><i class="fas fa-trophy"></i>การจัดอันดับโดยรวม</h3>' +
-        '<p class="text-red-600">เกิดข้อผิดพลาดในการแสดงผลข้อมูลการจัดอันดับ</p>' +
-        '</div>';
+      return `
+        <div class="result-card">
+          <h3><i class="fas fa-trophy"></i>การจัดอันดับโดยรวม</h3>
+          <p class="text-red-600">เกิดข้อผิดพลาดในการแสดงผลข้อมูลการจัดอันดับ</p>
+        </div>
+      `;
     }
   }
 
@@ -1840,8 +1275,8 @@ window.addEventListener('DOMContentLoaded', () => {
         </div>
         <div class="text-center">
           <img src="${imgSrc}" alt="${titles[type]}" 
-               class="max-w-full h-auto mx-auto border-2 border-gray-300 rounded-lg shadow-md hover:shadow-lg transition-shadow visualization-image" 
-               data-modal-image="true"
+               class="max-w-full h-auto mx-auto border-2 border-gray-300 rounded-lg shadow-md hover:shadow-lg transition-shadow" 
+               onclick="analyzer.openImageModal(this)" 
                style="cursor: pointer;" />
         </div>
         ${data.url ? `<a href="${this.apiBaseUrl ? this.apiBaseUrl + data.url : data.url}" 
@@ -1938,18 +1373,20 @@ window.addEventListener('DOMContentLoaded', () => {
             <img 
               src="${imgSrc}" 
               alt="Network Diagram" 
-              class="result-image mx-auto hover:shadow-lg transition-shadow cursor-pointer visualization-image"
-              data-modal-image="true"
+              class="result-image mx-auto hover:shadow-lg transition-shadow cursor-pointer"
+              onclick="analyzer.openImageModal(this)"
+              onmousemove="analyzer.showNetworkTooltip(event)"
+              onmouseleave="analyzer.hideTooltip()"
               data-tooltip="true"
             />
             <div class="absolute top-2 right-2 z-10 space-x-2">
-              <button id="zoomInBtn" class="bg-white p-2 rounded-full shadow hover:shadow-lg transition-shadow text-gray-600 hover:text-gray-800">
+              <button class="bg-white p-2 rounded-full shadow hover:shadow-lg transition-shadow text-gray-600 hover:text-gray-800" onclick="analyzer.zoomInNetwork()">
                 <i class="fas fa-search-plus"></i>
               </button>
-              <button id="zoomOutBtn" class="bg-white p-2 rounded-full shadow hover:shadow-lg transition-shadow text-gray-600 hover:text-gray-800">
+              <button class="bg-white p-2 rounded-full shadow hover:shadow-lg transition-shadow text-gray-600 hover:text-gray-800" onclick="analyzer.zoomOutNetwork()">
                 <i class="fas fa-search-minus"></i>
               </button>
-              <button id="resetZoomBtn" class="bg-white p-2 rounded-full shadow hover:shadow-lg transition-shadow text-gray-600 hover:text-gray-800">
+              <button class="bg-white p-2 rounded-full shadow hover:shadow-lg transition-shadow text-gray-600 hover:text-gray-800" onclick="analyzer.resetNetworkZoom()">
                 <i class="fas fa-undo"></i>
               </button>
             </div>
@@ -1970,79 +1407,17 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 
   initializeResultInteractions() {
-    try {
-      // Bind result action buttons using pre-bound methods
-      const downloadBtn = document.getElementById('downloadResultsBtn');
-      if (downloadBtn) {
-        downloadBtn.addEventListener('click', this.downloadResults);
-      }
+    // Load CSV data for comparison table
+    this.loadComparisonTable();
+    // Load CSV data for similarity matrix
+    this.loadSimilarityMatrix();
 
-      const startNewBtn = document.getElementById('startNewBtn');
-      if (startNewBtn) {
-        startNewBtn.addEventListener('click', this.startNewAnalysis);
-      }
-
-      // Network visualization controls
-      const zoomInBtn = document.getElementById('zoomInBtn');
-      if (zoomInBtn) {
-        zoomInBtn.addEventListener('click', this.zoomInNetwork);
-      }
-
-      const zoomOutBtn = document.getElementById('zoomOutBtn');
-      if (zoomOutBtn) {
-        zoomOutBtn.addEventListener('click', this.zoomOutNetwork);
-      }
-
-      const resetZoomBtn = document.getElementById('resetZoomBtn');
-      if (resetZoomBtn) {
-        resetZoomBtn.addEventListener('click', this.resetNetworkZoom);
-      }
-
-      // Bind image modals
-      document.querySelectorAll('[data-modal-image]').forEach(img => {
-        img.addEventListener('click', () => this.openImageModal(img));
-      });
-
-      // Bind modal close buttons
-      document.querySelectorAll('.close-modal-btn').forEach(btn => {
-        btn.addEventListener('click', e => {
-          const modal = e.target.closest('.modal');
-          if (modal) modal.remove();
-        });
-      });
-
-      // Bind file removal buttons 
-      document.querySelectorAll('.remove-file-btn').forEach(btn => {
-        const index = btn.getAttribute('data-index');
-        if (index !== null) {
-          btn.addEventListener('click', () => this.removeFileItem(parseInt(index)));
-        }
-      });
-
-      // Bind network image tooltips
-      const networkImage = document.querySelector('.result-image[data-tooltip]');
-      if (networkImage) {
-        networkImage.addEventListener('mousemove', e => this.showNetworkTooltip(e));
-        networkImage.addEventListener('mouseleave', () => this.hideTooltip());
-      }
-
-      // Load CSV data for comparison table
-      this.loadComparisonTable();
-      
-      // Load CSV data for similarity matrix
-      this.loadSimilarityMatrix();
-
-      // Render any pending visualizations
-      if (this.pendingHeatmap) {
-        this.renderHeatmap(this.pendingHeatmap.plotId, this.pendingHeatmap.data);
-      }
-      if (this.pendingNetwork) {
-        this.renderNetwork(this.pendingNetwork.plotId, this.pendingNetwork.data);
-      }
-
-      console.log('Result interactions initialized successfully');
-    } catch (error) {
-      console.error('Error initializing result interactions:', error);
+    // Render any pending visualizations
+    if (this.pendingHeatmap) {
+      this.renderHeatmap(this.pendingHeatmap.plotId, this.pendingHeatmap.data);
+    }
+    if (this.pendingNetwork) {
+      this.renderNetwork(this.pendingNetwork.plotId, this.pendingNetwork.data);
     }
   }
 
@@ -2673,7 +2048,7 @@ window.addEventListener('DOMContentLoaded', () => {
     modal.innerHTML = `
       <div class="max-w-full max-h-full p-4">
         <img src="${img.src}" alt="${img.alt}" class="max-w-full max-h-full" />
-        <button class="absolute top-4 right-4 text-white text-2xl close-modal-btn">
+        <button onclick="this.parentElement.parentElement.remove()" class="absolute top-4 right-4 text-white text-2xl">
           <i class="fas fa-times"></i>
         </button>
       </div>

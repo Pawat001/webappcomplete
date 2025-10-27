@@ -25,10 +25,12 @@ app.get('/', (c) => {
         <script src="https://cdn.tailwindcss.com"></script>
         <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet" />
         <link href="/static/styles.css" rel="stylesheet" />
-        {/* Inject API base URL from Vite env */}
-        <script dangerouslySetInnerHTML={{
-          __html: `window.apiBaseUrl = '${import.meta.env.VITE_API_URL || 'http://localhost:8000'}';`
-        }} />
+        {/* Inject API base URL from Vite env so static JS can call backend in dev */}
+        <script
+  dangerouslySetInnerHTML={{
+    __html: `window.apiBaseUrl = '${import.meta.env.VITE_API_URL || 'http://localhost:8000'}';`
+  }}
+/>
       </head>
       <body class="bg-gray-50 min-h-screen">
         {/* Header */}
