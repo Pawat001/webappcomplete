@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+import matplotlib.font_manager as fm
 
 # ---------------------------
 # Utilities
@@ -137,6 +138,14 @@ def annotate_heatmap(ax, im, data):
                    fontsize=fontsize, color=text_color, weight='bold')
 
 def plot_heatmap(matrix: np.ndarray, xlabels: List[str], ylabels: List[str], title: str, outpath: str):
+    # --- START: ADDED FONT SETUP ---
+    try:
+        font_path = fm.findfont(fm.FontProperties(family='TH Sarabun New'))
+        plt.rcParams['font.family'] = 'TH Sarabun New'
+    except ValueError:
+        print("⚠️ Thai font ('TH Sarabun New') not found for heatmap.")
+    # --- END: ADDED FONT SETUP ---
+
     # Calculate optimal cell size based on number of items
     nrows, ncols = len(ylabels), len(xlabels)
     
@@ -190,6 +199,14 @@ def plot_network(edges: List[Tuple[str, str, float]], outpath: str, topk:int=3):
     edges: (input_doc, db_doc, weight)
     Draw bipartite-like graph connecting input docs to their top-K db neighbors.
     """
+    # --- START: ADDED FONT SETUP ---
+    try:
+        font_path = fm.findfont(fm.FontProperties(family='TH Sarabun New'))
+        plt.rcParams['font.family'] = 'TH Sarabun New'
+    except ValueError:
+        print("⚠️ Thai font ('TH Sarabun New') not found for network.")
+    # --- END: ADDED FONT SETUP ---
+
     # Keep only topk edges per input doc
     by_input: Dict[str, List[Tuple[str,str,float]]] = {}
     for a, b, w in edges:

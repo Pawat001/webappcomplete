@@ -1,6 +1,8 @@
 /**
  * Novel Similarity Analyzer - Frontend JavaScript
  * Handles file uploads, API communication, and results display
+ *
+ * (เวอร์ชันสมบูรณ์ - แก้ไข TypeError และ input_similarities แล้ว)
  */
 
 // Add CSS styles for visualizations
@@ -28,6 +30,12 @@ style.textContent = `
     font-size: 0.875rem;
     line-height: 1.4;
     z-index: 50;
+  }
+
+  /* Plotly container styles */
+  .plot-container {
+    width: 100%;
+    min-height: 500px; /* Ensure space for the plot */
   }
 `;
 document.head.appendChild(style);
@@ -85,7 +93,7 @@ class NovelSimilarityAnalyzer {
       this.apiBaseUrl = '';
     }
     // If a runtime API base URL was injected (dev), prefer it
-    if (typeof window !== 'undefined' && window.apiBaseUrl !== undefined) {
+    if (typeof window !== 'undefined' && window.apiBaseUrl !== undefined && window.apiBaseUrl !== '') { // Added check for empty string
       this.apiBaseUrl = window.apiBaseUrl;
     }
 
@@ -209,7 +217,7 @@ class NovelSimilarityAnalyzer {
       const ext = file.name.toLowerCase().split('.').pop();
       const isSupported = ['txt', 'docx', 'pdf'].includes(ext);
       
-      console.log('📄 File: ' + file.name + ', Path: ' + file.webkitRelativePath + ', Supported: ' + isSupported);
+      console.log('📄 File: ' + file.name + ', Path: ' + (file.webkitRelativePath || 'N/A') + ', Supported: ' + isSupported);
       
       return isSupported;
     });
@@ -306,6 +314,7 @@ class NovelSimilarityAnalyzer {
 
     if (!file.name.endsWith('.zip')) {
       this.showAlert('ไฟล์ฐานข้อมูลต้องเป็นไฟล์ .zip เท่านั้น', 'error');
+      event.target.value = ''; // Clear the input
       return;
     }
 
@@ -333,18 +342,18 @@ class NovelSimilarityAnalyzer {
     }
     
     div.innerHTML = `
-      <div class="flex items-center space-x-3">
-        <i class="${typeIcon} text-blue-600"></i>
-        <div>
-          <p class="font-medium text-gray-900">${displayName}</p>
+      <div class="flex items-center space-x-3 overflow-hidden">
+        <i class="${typeIcon} text-blue-600 flex-shrink-0"></i>
+        <div class="flex-1 min-w-0">
+          <p class="font-medium text-gray-900 truncate" title="${displayName}">${displayName}</p>
           <p class="text-sm text-gray-600">${sizeText}</p>
         </div>
       </div>
-      <div class="flex items-center space-x-2">
+      <div class="flex items-center space-x-2 flex-shrink-0">
         <span class="text-green-600 text-sm">
           <i class="fas fa-check-circle"></i> Ready
         </span>
-        <button type="button" class="text-red-600 hover:text-red-800" onclick="analyzer.removeFileItem(${index})">
+        <button type="button" class="text-red-600 hover:text-red-800" onclick="analyzer.removeFileItem(${index}, '${type}')">
           <i class="fas fa-times"></i>
         </button>
       </div>
@@ -371,20 +380,37 @@ class NovelSimilarityAnalyzer {
     }
   }
 
-  removeFileItem(index) {
-    // Remove from display
-    const fileItem = document.querySelector(`[data-file-index="${index}"]`);
-    if (fileItem) {
-      fileItem.remove();
-    }
+  removeFileItem(index, type) {
+     if (type === 'database') {
+        const container = document.getElementById('databaseFileInfo');
+        if (container) container.innerHTML = '';
+        const input = document.getElementById('databaseFile');
+        if (input) input.value = ''; // Clear the file input
+     } else {
+        // Remove from display
+        const fileItem = document.querySelector(`#inputFilesList [data-file-index="${index}"]`);
+        if (fileItem) {
+          fileItem.remove();
+        }
 
-    // Update the file input by collecting remaining files
-    const inputFiles = document.getElementById('inputFiles');
-    if (inputFiles && inputFiles.files) {
-      const remainingFiles = Array.from(inputFiles.files).filter((_, i) => i !== index);
-      this.updateFileInput(remainingFiles);
+        // Update the stored file list
+        if (this.currentFiles) {
+            this.currentFiles = this.currentFiles.filter((_, i) => i !== index);
+            // Re-index remaining displayed items
+            const remainingItems = document.querySelectorAll('#inputFilesList .file-item');
+            remainingItems.forEach((item, newIndex) => {
+                item.dataset.fileIndex = newIndex;
+                const button = item.querySelector('button');
+                if (button) {
+                    button.setAttribute('onclick', `analyzer.removeFileItem(${newIndex}, '${type}')`);
+                }
+            });
+            // Update the file input element itself
+            this.updateFileInput(this.currentFiles);
+        }
     }
   }
+
 
   getFileTypeIcon(filename) {
     const extension = filename.split('.').pop().toLowerCase();
@@ -417,7 +443,7 @@ class NovelSimilarityAnalyzer {
     if (value) {
       const names = value.split(',').map(name => name.trim()).filter(name => name.length > 0);
       if (names.length > 0) {
-        preview.innerHTML = `<strong>ชื่อที่จะใช้:</strong> ${names.map((name, i) => `<span class="inline-block bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs mr-1">${i + 1}. ${name}</span>`).join('')}`;
+        preview.innerHTML = `<strong>ชื่อที่จะใช้:</strong> ${names.map((name, i) => `<span class="inline-block bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs mr-1 mb-1">${i + 1}. ${name}</span>`).join('')}`;
       } else {
         preview.innerHTML = '';
       }
@@ -444,15 +470,21 @@ class NovelSimilarityAnalyzer {
       // Add input files (handle both regular files and folder files)
       let filesToUpload = [];
       
-      // Check if we have stored files (from folder selection)
+      // Check if we have stored files (from folder selection or updated list)
       if (this.currentFiles && this.currentFiles.length > 0) {
         filesToUpload = this.currentFiles;
-        console.log('📁 Using stored folder files:', filesToUpload.length);
+        console.log('⬆️ Using currentFiles list:', filesToUpload.length);
       } else {
-        // Use regular file input
-        const inputFiles = document.getElementById('inputFiles').files;
-        filesToUpload = Array.from(inputFiles);
-        console.log('📄 Using regular files:', filesToUpload.length);
+        // Use regular file input as fallback
+        const inputFilesElement = document.getElementById('inputFiles');
+        filesToUpload = inputFilesElement ? Array.from(inputFilesElement.files) : [];
+        console.log('📄 Using file input element files:', filesToUpload.length);
+      }
+      
+      if (filesToUpload.length === 0 && !document.getElementById('textInput').value.trim()) {
+         this.showAlert('กรุณาเลือกไฟล์สำหรับวิเคราะห์ หรือใส่ข้อความโดยตรง', 'error');
+         this.showLoading(false);
+         return;
       }
       
       // Append files to FormData with additional metadata
@@ -473,6 +505,10 @@ class NovelSimilarityAnalyzer {
       const databaseFile = document.getElementById('databaseFile').files[0];
       if (databaseFile) {
         formData.append('database_file', databaseFile);
+      } else {
+         this.showAlert('กรุณาเลือกไฟล์ฐานข้อมูล (.zip)', 'error');
+         this.showLoading(false);
+         return;
       }
       
       // Add text input if provided
@@ -507,6 +543,9 @@ class NovelSimilarityAnalyzer {
           if (progressEvent.lengthComputable) {
             const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
             this.updateProgress(percentCompleted, 'กำลังอัปโหลดไฟล์...');
+          } else {
+            // Indeterminate progress if total size is unknown
+            this.updateProgress(50, 'กำลังอัปโหลดไฟล์ (ไม่ทราบขนาด)...');
           }
         }
       });
@@ -517,7 +556,8 @@ class NovelSimilarityAnalyzer {
         this.updateProgress(100, 'เสร็จสิ้น');
         
         // Hide loading and show results
-        this.showLoading(false);
+        // Use finally block ensures loading is hidden even if displayResults throws error
+        // this.showLoading(false); // Moved to finally
         this.displayResults(response.data);
       } else {
         throw new Error(response.data.message || 'การวิเคราะห์ล้มเหลว');
@@ -526,7 +566,7 @@ class NovelSimilarityAnalyzer {
     } catch (error) {
       console.error('Analysis failed:', error);
       // Ensure loading spinner is hidden on error
-      try { this.showLoading(false); } catch (e) {}
+      // this.showLoading(false); // Moved to finally block
       
       let errorMessage = 'เกิดข้อผิดพลาดในการวิเคราะห์';
       
@@ -542,43 +582,56 @@ class NovelSimilarityAnalyzer {
         } else if (status === 413) {
           errorMessage = 'ไฟล์มีขนาดใหญ่เกินไป กรุณาลดขนาดไฟล์';
         } else if (status === 500) {
-          errorMessage = 'เกิดข้อผิดพลาดที่เซิร์ฟเวอร์ กรุณาลองใหม่อีกครั้ง';
+          errorMessage = 'เกิดข้อผิดพลาดที่เซิร์ฟเวอร์ กรุณาลองใหม่อีกครั้ง (' + (error.response.data?.detail || 'No details') + ')';
+        } else if (status === 503 || status === 504) { // Service Unavailable or Gateway Timeout
+          errorMessage = 'เซิร์ฟเวอร์กำลังประมวลผลหนัก อาจใช้เวลานานกว่าปกติ กรุณาลองใหม่ภายหลัง';
         } else if (status >= 500) {
-          errorMessage = 'เซิร์ฟเวอร์ไม่สามารถให้บริการได้ในขณะนี้';
+          errorMessage = 'เซิร์ฟเวอร์ไม่สามารถให้บริการได้ในขณะนี้ (' + status + ')';
         } else {
           errorMessage = error.response.data?.detail || `เกิดข้อผิดพลาด (${status})`;
         }
       } else if (error.request) {
-        // Request was made but no response received
-        errorMessage = 'ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต';
+        // Request was made but no response received (e.g., server down, CORS, network error)
+         if (error.message.includes('Network Error')) {
+             errorMessage = 'ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ Backend ได้ กรุณาตรวจสอบว่า Backend ทำงานอยู่หรือไม่';
+         } else {
+            errorMessage = 'ไม่ได้รับการตอบสนองจากเซิร์ฟเวอร์';
+         }
       } else {
-        errorMessage = error.message || 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ';
+        // Something happened in setting up the request that triggered an Error
+        errorMessage = error.message || 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุในการส่งคำขอ';
       }
       
       this.showAlert(errorMessage, 'error');
+    } finally {
+        // --- ADDED ---
+        // Ensure loading indicator is always hidden after attempt
+        this.showLoading(false);
+        // --- END ADDED ---
     }
   }
 
   validateForm() {
-    const inputFiles = document.getElementById('inputFiles').files;
+    // Use this.currentFiles if available (handles folder uploads)
+    const filesToValidate = this.currentFiles || (document.getElementById('inputFiles') ? document.getElementById('inputFiles').files : []);
     const textInput = document.getElementById('textInput').value.trim();
     const databaseFile = document.getElementById('databaseFile').files[0];
     
     // Check input requirements
-    if (inputFiles.length === 0 && !textInput) {
+    if (filesToValidate.length === 0 && !textInput) {
       this.showAlert('กรุณาเลือกไฟล์สำหรับวิเคราะห์ หรือใส่ข้อความโดยตรง', 'error');
       document.getElementById('inputFilesDropzone').scrollIntoView({ behavior: 'smooth' });
       return false;
     }
     
     // Check file count limit
-    if (inputFiles.length > this.maxInputFiles) {
+    if (filesToValidate.length > this.maxInputFiles) {
       this.showAlert(`สามารถอัปโหลดได้สูงสุด ${this.maxInputFiles} ไฟล์เท่านั้น`, 'error');
       return false;
     }
     
     // Validate file types
-    for (let file of inputFiles) {
+    for (let file of filesToValidate) {
       const ext = file.name.toLowerCase().split('.').pop();
       if (!['txt', 'docx', 'pdf'].includes(ext)) {
         this.showAlert(`ไฟล์ ${file.name} ไม่ได้รับการสนับสนุน (รองรับเฉพาะ .txt, .docx, .pdf)`, 'error');
@@ -600,7 +653,7 @@ class NovelSimilarityAnalyzer {
     
     // Check file sizes
     const maxFileSize = 10 * 1024 * 1024; // 10MB
-    for (let file of inputFiles) {
+    for (let file of filesToValidate) {
       if (file.size > maxFileSize) {
         this.showAlert(`ไฟล์ ${file.name} มีขนาดใหญ่เกินไป (สูงสุด 10MB)`, 'error');
         return false;
@@ -618,13 +671,16 @@ class NovelSimilarityAnalyzer {
   showLoading(show) {
     const loadingSection = document.getElementById('loadingSection');
     const resultsSection = document.getElementById('resultsSection');
+    const analyzeBtn = document.getElementById('analyzeBtn'); // Get the button
     
     if (show) {
-      loadingSection.classList.remove('hidden');
-      resultsSection.classList.add('hidden');
+      if(loadingSection) loadingSection.classList.remove('hidden');
+      if(resultsSection) resultsSection.classList.add('hidden'); // Hide results only if loading starts
+      if (analyzeBtn) analyzeBtn.disabled = true; // Disable button while loading
       this.updateProgress(10, 'เริ่มต้นการวิเคราะห์...');
     } else {
-      loadingSection.classList.add('hidden');
+      if (loadingSection) loadingSection.classList.add('hidden');
+      if (analyzeBtn) analyzeBtn.disabled = false; // Re-enable button
     }
   }
 
@@ -656,14 +712,24 @@ class NovelSimilarityAnalyzer {
     // Store current results for later use
     this.currentResults = data;
 
-    resultsSection.innerHTML = this.generateResultsHTML(data);
-    resultsSection.classList.remove('hidden');
-    
-    // Scroll to results
-    resultsSection.scrollIntoView({ behavior: 'smooth' });
-    
-    // Initialize result interactions
-    this.initializeResultInteractions();
+    // Clear previous results before adding new ones
+    resultsSection.innerHTML = ''; 
+
+    try {
+      resultsSection.innerHTML = this.generateResultsHTML(data);
+      resultsSection.classList.remove('hidden');
+      
+      // Scroll to results
+      resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' }); // Scroll to top of results
+      
+      // Initialize result interactions (like loading CSVs, rendering plots)
+      this.initializeResultInteractions();
+
+    } catch (error) {
+        console.error("Error generating results HTML:", error);
+        resultsSection.innerHTML = '<div class="result-card"><p class="text-red-600">เกิดข้อผิดพลาดในการแสดงผลลัพธ์: ' + error.message + '</p></div>';
+        resultsSection.classList.remove('hidden');
+    }
   }
 
   generateResultsHTML(data) {
@@ -674,11 +740,15 @@ class NovelSimilarityAnalyzer {
     const heatmapData = results.similarity_heatmap || results.heatmap || {};
     const networkData = results.network_top_matches || results.network || {};
     
+    // Clear pending plots before generating new HTML
+    this.pendingHeatmap = null;
+    this.pendingNetwork = null;
+
     return `
       <div class="bg-white rounded-lg shadow-md p-6 mb-6">
         ${this.generateAnalyzedWorksHeader(data)}
         
-        <div class="flex items-center justify-between mb-6">
+        <div class="flex items-center justify-between mb-6 flex-wrap gap-4">
           <h2 class="text-2xl font-semibold text-gray-900">
             <i class="fas fa-chart-line mr-2 text-blue-600"></i>
             ผลการวิเคราะห์
@@ -722,25 +792,33 @@ class NovelSimilarityAnalyzer {
   }
 
   generateAnalysisByInputCard(rankingData) {
-    if (!rankingData || !rankingData.content) return '';
+    // Check if rankingData or its content is missing
+    if (!rankingData || !rankingData.content) {
+       console.warn("Analysis by input card skipped: No rankingData or content.");
+       return ''; // Return empty string if data is missing
+    }
     
     try {
-      // --- FIXED ---
-      const data = rankingData.content;
-      // --- END FIX ---
+      const data = rankingData.content; // Use the object directly
       console.log('Parsed analysis data:', data);
 
-      if (!data.analysis_by_input || !Array.isArray(data.analysis_by_input)) {
+      if (!data || !data.analysis_by_input || !Array.isArray(data.analysis_by_input)) {
+        console.warn("Analysis by input card skipped: Invalid data structure.", data);
         return `
           <div class="result-card">
             <h3><i class="fas fa-file-alt"></i> ผลการวิเคราะห์แยกตามไฟล์</h3>
-            <p class="text-red-500">ไม่พบข้อมูลการวิเคราะห์</p>
+            <p class="text-red-500">ไม่พบข้อมูลการวิเคราะห์ หรือข้อมูลมีรูปแบบไม่ถูกต้อง</p>
           </div>`;
       }
       
       const inputAnalysisHtml = data.analysis_by_input.map(input => {
-        // Show top matches first (top 10)
-        const topMatches = input.similarities.slice(0, 10);
+        // Ensure similarities is an array, default to empty array if not
+        const similarities = Array.isArray(input.similarities) ? input.similarities : [];
+        const topMatches = similarities.slice(0, 10); // Safe slicing
+
+        if (topMatches.length === 0) {
+            return `<div class="mb-4 text-gray-500">ไม่มีผลลัพธ์ความคล้ายคลึงสำหรับไฟล์: ${input.input_title}</div>`;
+        }
         
         const similarityRows = topMatches.map((sim, index) => {
           // Use enhanced metadata for better display
@@ -749,19 +827,18 @@ class NovelSimilarityAnalyzer {
           let displayDetail = '';
           
           if (sim.folder_name && sim.folder_name !== 'N/A') {
-            // 3-level structure: Show novel title prominently
             displayTitle = `📚 ${sim.folder_name}`;
-            displaySubtitle = `${sim.genre} › Chapter: ${sim.chapter_name}`;
-            displayDetail = `File: ${sim.database_file}`;
+            displaySubtitle = `${sim.genre || 'N/A'} › Chapter: ${sim.chapter_name || 'N/A'}`;
+            displayDetail = `File: ${sim.database_file || 'N/A'}`;
           } else {
-            // 2-level structure: Show filename prominently
-            displayTitle = `📄 ${sim.chapter_name}`;
-            displaySubtitle = `หมวดหมู่: ${sim.genre}`;
-            displayDetail = `File: ${sim.database_file}`;
+            displayTitle = `📄 ${sim.chapter_name || sim.database_file || 'N/A'}`; // Fallback chain
+            displaySubtitle = `หมวดหมู่: ${sim.genre || 'N/A'}`;
+            displayDetail = `File: ${sim.database_file || 'N/A'}`;
           }
           
           const rankIcon = index < 3 ? ['🥇', '🥈', '🥉'][index] : `#${index + 1}`;
           const rowClass = index < 3 ? 'bg-yellow-50' : 'hover:bg-gray-50';
+          const similarityScore = typeof sim.similarity === 'number' ? sim.similarity : 0; // Default to 0 if missing/invalid
           
           return `
             <tr class="${rowClass}">
@@ -779,12 +856,12 @@ class NovelSimilarityAnalyzer {
               </td>
               <td class="px-4 py-3">
                 <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                  ${sim.genre}
+                  ${sim.genre || 'N/A'}
                 </span>
               </td>
               <td class="px-4 py-3 text-right">
-                <span class="font-semibold text-xl ${sim.similarity >= 70 ? 'text-green-600' : sim.similarity >= 50 ? 'text-yellow-600' : 'text-gray-600'}">
-                  ${sim.similarity}%
+                <span class="font-semibold text-xl ${similarityScore >= 70 ? 'text-green-600' : similarityScore >= 50 ? 'text-yellow-600' : 'text-gray-600'}">
+                  ${similarityScore.toFixed(1)}% 
                 </span>
               </td>
             </tr>
@@ -796,7 +873,7 @@ class NovelSimilarityAnalyzer {
             <div class="bg-gradient-to-r from-blue-100 to-indigo-100 rounded-lg p-4 mb-4">
               <h4 class="text-xl font-bold text-blue-900 mb-2">
                 <i class="fas fa-file-alt text-blue-600 mr-2"></i>
-                ไฟล์วิเคราะห์: ${input.input_title}
+                ไฟล์วิเคราะห์: ${input.input_title || 'Unknown Input'}
               </h4>
               <p class="text-blue-700 text-sm">
                 <i class="fas fa-info-circle mr-1"></i>
@@ -840,19 +917,28 @@ class NovelSimilarityAnalyzer {
       `;
       
     } catch (error) {
-      console.error('Error parsing analysis by input data:', error);
-      return '';
+      console.error('Error generating analysis by input card:', error);
+      // Return an error message within the card structure
+      return `
+         <div class="result-card">
+           <h3><i class="fas fa-chart-bar"></i>📊 การวิเคราะห์ตามไฟล์อินพุต</h3>
+           <p class="text-red-600">เกิดข้อผิดพลาดในการแสดงผลข้อมูล: ${error.message}</p>
+         </div>
+      `;
     }
   }
 
   generateReportCard(reportData) {
-    if (!reportData) return '';
+    if (!reportData || !reportData.content) {
+         console.warn("Report card skipped: No reportData or content.");
+         return ''; // Skip if no content
+     }
     
     return `
       <div class="result-card">
         <h3><i class="fas fa-file-alt"></i>รายงานสรุป</h3>
         <div class="bg-gray-50 rounded-lg p-4">
-          <pre class="whitespace-pre-wrap text-sm text-gray-800 custom-scrollbar" style="max-height: 400px; overflow-y: auto;">${reportData.content || 'ไม่มีข้อมูลรายงาน'}</pre>
+          <pre class="whitespace-pre-wrap text-sm text-gray-800 custom-scrollbar" style="max-height: 400px; overflow-y: auto;">${reportData.content}</pre>
         </div>
         ${reportData.url ? `<a href="${this.apiBaseUrl ? this.apiBaseUrl + reportData.url : reportData.url}" download class="download-btn mt-4"><i class="fas fa-download"></i>ดาวน์โหลดรายงาน</a>` : ''}
       </div>
@@ -860,7 +946,11 @@ class NovelSimilarityAnalyzer {
   }
 
   generateComparisonTableCard(tableData) {
-    if (!tableData) return '';
+    // Check if tableData or its URL is missing
+     if (!tableData || !tableData.url) {
+        console.warn("Comparison table card skipped: No tableData or URL.");
+        return ''; // Skip rendering if no URL to load from
+    }
     
     return `
       <div class="result-card">
@@ -872,18 +962,21 @@ class NovelSimilarityAnalyzer {
             คะแนนความคล้าย (top_similarity) และการจัดประเภทความสัมพันธ์ (relation: duplicate/similar/different)
           </p>
         </div>
-        <div class="overflow-x-auto">
-          <div id="comparisonTableContainer" class="bg-gray-50 rounded-lg p-4">
+        <div class="overflow-x-auto border border-gray-200 rounded-lg">
+          <div id="comparisonTableContainer" class="bg-gray-50 p-4 min-h-[100px]"> 
             <p class="text-gray-600">กำลังโหลดข้อมูลตาราง...</p>
           </div>
         </div>
-        ${tableData.url ? `<a href="${this.apiBaseUrl ? this.apiBaseUrl + tableData.url : tableData.url}" download class="download-btn mt-4"><i class="fas fa-download"></i>ดาวน์โหลด CSV</a>` : ''}
+        <a href="${this.apiBaseUrl ? this.apiBaseUrl + tableData.url : tableData.url}" download class="download-btn mt-4"><i class="fas fa-download"></i>ดาวน์โหลด CSV</a>
       </div>
     `;
   }
 
   generateSimilarityMatrixCard(matrixData) {
-    if (!matrixData) return '';
+     if (!matrixData || !matrixData.url) {
+        console.warn("Similarity matrix card skipped: No matrixData or URL.");
+        return '';
+    }
     
     return `
       <div class="result-card">
@@ -895,24 +988,28 @@ class NovelSimilarityAnalyzer {
             ค่าใกล้ 1 = คล้ายคลึงมาก, ค่าใกล้ 0 = แตกต่างมาก
           </p>
         </div>
-        <div class="overflow-x-auto">
-          <div id="similarityMatrixContainer" class="bg-gray-50 rounded-lg p-4">
+        <div class="overflow-x-auto border border-gray-200 rounded-lg">
+          <div id="similarityMatrixContainer" class="bg-gray-50 p-4 min-h-[100px]">
             <p class="text-gray-600">กำลังโหลดข้อมูลเมทริกซ์...</p>
           </div>
         </div>
-        ${matrixData.url ? `<a href="${this.apiBaseUrl ? this.apiBaseUrl + matrixData.url : matrixData.url}" download class="download-btn mt-4"><i class="fas fa-download"></i>ดาวน์โหลด CSV</a>` : ''}
+        <a href="${this.apiBaseUrl ? this.apiBaseUrl + matrixData.url : matrixData.url}" download class="download-btn mt-4"><i class="fas fa-download"></i>ดาวน์โหลด CSV</a>
       </div>
     `;
   }
 
   generateOverallRankingCard(rankingData) {
-    if (!rankingData) return '';
+     if (!rankingData || !rankingData.content) {
+         console.warn("Overall ranking card skipped: No rankingData or content.");
+         return '';
+     }
     
     try {
-      // --- FIXED ---
-      const data = rankingData.content ? rankingData.content : null;
-      // --- END FIX ---
-      if (!data) return '';
+      const data = rankingData.content; // Use object directly
+      if (!data) {
+          console.warn("Overall ranking card skipped: Content is null or invalid.");
+          return '';
+      }
       
       // Generate top 3 summary cards
       const genreRank = data.genre_rank_overall || [];
@@ -925,45 +1022,50 @@ class NovelSimilarityAnalyzer {
           const colors = ['bg-yellow-50 border-yellow-300 text-yellow-800', 
                          'bg-gray-50 border-gray-300 text-gray-800', 
                          'bg-orange-50 border-orange-300 text-orange-800'];
+           const maxScore = typeof genre.max === 'number' ? Math.round(genre.max * 100) : 'N/A';
+           const meanScore = typeof genre.mean === 'number' ? Math.round(genre.mean * 100) : 'N/A';
           
           return `
             <div class="border-2 ${colors[index]} rounded-lg p-4">
               <div class="flex items-center justify-between">
                 <div>
                   <span class="text-2xl mr-2">${medals[index]}</span>
-                  <span class="font-bold text-lg">${genre.genre}</span>
+                  <span class="font-bold text-lg">${genre.genre || 'Unknown'}</span>
                 </div>
                 <div class="text-right">
-                  <div class="text-2xl font-bold">${Math.round(genre.max * 100)}%</div>
+                  <div class="text-2xl font-bold">${maxScore}%</div>
                   <div class="text-sm opacity-75">ความคล้ายสูงสุด</div>
                 </div>
               </div>
               <div class="mt-2 text-sm">
-                ค่าเฉลี่ย: ${Math.round(genre.mean * 100)}%
+                ค่าเฉลี่ย: ${meanScore}%
               </div>
             </div>
           `;
         }).join('');
+      } else {
+          summaryCards = '<p class="text-gray-500 col-span-1 md:col-span-3">ไม่มีข้อมูลการจัดอันดับตามหมวดหมู่</p>';
       }
       
       // Generate detailed table with improved novel title display
       let detailTable = '';
       if (dbRank.length > 0) {
           const tableRows = dbRank.slice(0, 10).map((doc, index) => {
-          // Prefer novel_title (backend augmented), then folder_name, then chapter_name
           let primaryDisplay = '';
           let secondaryDisplay = '';
 
           const novelTitle = doc.novel_title || doc.title || doc.folder_name || 'N/A';
           const chapterName = doc.chapter_name || doc.file_name || doc.db_doc || '';
 
-          if (novelTitle && novelTitle !== 'N/A') {
+          if (novelTitle && novelTitle !== 'N/A' && novelTitle !== doc.genre) { // Avoid showing genre as title
             primaryDisplay = `📚 ${novelTitle}`;
             secondaryDisplay = `${doc.genre || ''} › ${chapterName}`;
           } else {
-            primaryDisplay = `📄 ${chapterName}`;
+            primaryDisplay = `📄 ${chapterName || doc.db_doc}`; // Ensure something is displayed
             secondaryDisplay = `หมวดหมู่: ${doc.genre || ''}`;
           }
+          const bestSim = typeof doc.best_similarity === 'number' ? doc.best_similarity : 0;
+
           return `
           <tr class="${index < 3 ? 'bg-yellow-50' : 'hover:bg-gray-50'}">
             <td class="px-4 py-3 text-center">
@@ -975,20 +1077,20 @@ class NovelSimilarityAnalyzer {
                 <i class="fas fa-tag mr-1"></i>${secondaryDisplay}
               </div>
               <div class="text-xs text-gray-400 mt-1">
-                <i class="fas fa-file mr-1"></i>File: ${doc.db_doc}
+                <i class="fas fa-file mr-1"></i>File: ${doc.db_doc || 'N/A'}
               </div>
             </td>
             <td class="px-4 py-3">
               <span class="inline-flex items-center px-3 py-1 text-sm rounded-full bg-gradient-to-r from-blue-100 to-indigo-100 text-blue-800 font-medium">
-                <i class="fas fa-folder mr-1"></i>${doc.genre}
+                <i class="fas fa-folder mr-1"></i>${doc.genre || 'N/A'}
               </span>
             </td>
             <td class="px-4 py-3 text-right">
-              <div class="text-2xl font-bold ${doc.best_similarity >= 0.7 ? 'text-green-600' : doc.best_similarity >= 0.5 ? 'text-yellow-600' : 'text-gray-600'}">
-                ${Math.round(doc.best_similarity * 100)}%
+              <div class="text-2xl font-bold ${bestSim >= 0.7 ? 'text-green-600' : bestSim >= 0.5 ? 'text-yellow-600' : 'text-gray-600'}">
+                ${Math.round(bestSim * 100)}%
               </div>
               <div class="text-xs text-gray-500">
-                ${(doc.best_similarity * 100).toFixed(2)}% exact
+                ${(bestSim * 100).toFixed(2)}% exact
               </div>
             </td>
           </tr>
@@ -1007,8 +1109,8 @@ class NovelSimilarityAnalyzer {
                 <br>• <strong>📄 ชื่อไฟล์:</strong> สำหรับโครงสร้าง 2 ระดับ (Genre/File)
               </p>
             </div>
-            <div class="overflow-x-auto">
-              <table class="w-full border border-gray-200 rounded-lg shadow-sm">
+            <div class="overflow-x-auto border border-gray-200 rounded-lg shadow-sm">
+              <table class="w-full">
                 <thead class="bg-gradient-to-r from-gray-50 to-blue-50">
                   <tr>
                     <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">อันดับ</th>
@@ -1024,6 +1126,8 @@ class NovelSimilarityAnalyzer {
             </div>
           </div>
         `;
+      } else {
+           detailTable = '<p class="text-gray-500 mt-6">ไม่มีข้อมูลการจัดอันดับเอกสารโดยรวม</p>';
       }
       
       return `
@@ -1053,34 +1157,34 @@ class NovelSimilarityAnalyzer {
       `;
       
     } catch (error) {
-      console.error('Error parsing ranking data:', error);
+      console.error('Error generating/parsing ranking data:', error);
       return `
         <div class="result-card">
           <h3><i class="fas fa-trophy"></i>การจัดอันดับโดยรวม</h3>
-          <p class="text-red-600">เกิดข้อผิดพลาดในการแสดงผลข้อมูลการจัดอันดับ</p>
+          <p class="text-red-600">เกิดข้อผิดพลาดในการแสดงผลข้อมูลการจัดอันดับ: ${error.message}</p>
         </div>
       `;
     }
   }
 
   generateHeatmapCard(heatmapData) {
+    // Check if heatmapData or its data attribute is missing
     if (!heatmapData || !heatmapData.data) {
-      console.log('No heatmap data available');
-      return '';
+        console.warn('Heatmap card skipped: No heatmapData or heatmapData.data found.');
+        return ''; // Return empty string if no data to render
     }
 
     // Generate unique ID for the plot container
     var plotId = 'heatmap-plot-' + Date.now();
 
-    // Store data and plotId for rendering
+    // Store data and plotId for rendering later
     this.pendingHeatmap = {
-      data: heatmapData.data,
-      plotId: plotId
+        data: heatmapData.data,
+        plotId: plotId
     };
 
-    // If a URL is provided, render a container for the plot and a download link
-    if (heatmapData.url) {
-      return (
+    // Always render the container div for Plotly
+    return (
         '<div class="result-card">' +
           '<h3><i class="fas fa-fire"></i>🔥 แผนที่ความร้อนความคล้ายคลึง (Similarity Heatmap)</h3>' +
           '<div class="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">' +
@@ -1093,27 +1197,17 @@ class NovelSimilarityAnalyzer {
               '<br>• <i class="fas fa-mouse-pointer"></i> เลื่อนเมาส์เหนือเซลล์เพื่อดูรายละเอียด' +
             '</p>' +
           '</div>' +
-          '<div class="w-full bg-white rounded-lg border p-4">' +
-            '<div id="' + plotId + '" class="w-full h-[600px]"></div>' +
+          '<div class="w-full bg-white rounded-lg border p-4 overflow-hidden">' + // Added overflow-hidden
+            '<div id="' + plotId + '" class="w-full h-[600px] plot-container"></div>' + // Plotly container
           '</div>' +
-          (heatmapData.url ? ('<div class="mt-4 text-right">' +
+          (heatmapData.url ? ('<div class="mt-4 text-right">' + // Provide PNG download if URL exists
             '<a href="' + (this.apiBaseUrl ? this.apiBaseUrl + heatmapData.url : heatmapData.url) + '" ' +
-               'download class="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">' +
-              '<i class="fas fa-download mr-2"></i>ดาวน์โหลดรูปภาพ' +
+               'download="similarity_heatmap.png" class="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">' +
+              '<i class="fas fa-download mr-2"></i>ดาวน์โหลดรูปภาพ (PNG)' +
             '</a>' +
           '</div>') : '') +
         '</div>'
-      );
-    }
-
-    // Fallback to base64 image data
-    if (heatmapData.base64) {
-      console.log('Using heatmap base64 data');
-      return this.generateVisualizationCard('heatmap', heatmapData.base64, heatmapData);
-    }
-
-    console.log('No image source found for heatmap');
-    return '';
+    );
   }
 
   initializeCharts() {
@@ -1122,187 +1216,42 @@ class NovelSimilarityAnalyzer {
   }
 
   generateAnalysisVisualizationCards(results) {
-    // สร้าง visualization cards สำหรับการวิเคราะห์
+    // This function seems unused now as charts are within specific cards
+    // Kept for potential future use or reference
     const cards = [];
-
-    if (results.comparison_table) {
-      try {
-        const data = results.comparison_table.content ? JSON.parse(results.comparison_table.content) : null;
-        if (data) {
-          cards.push(`
-            <div class="result-card">
-              <h3><i class="fas fa-chart-bar"></i>📊 การวิเคราะห์เชิงภาพ</h3>
-              <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-4">
-                <div class="bg-blue-50 p-4 rounded-lg">
-                  <h4 class="font-medium text-blue-900 mb-2">กราฟแสดงความคล้ายคลึง</h4>
-                  <canvas id="similarityChart" class="w-full h-64"></canvas>
-                </div>
-                <div class="bg-green-50 p-4 rounded-lg">
-                  <h4 class="font-medium text-green-900 mb-2">การกระจายตัวของประเภท</h4>
-                  <canvas id="genreChart" class="w-full h-64"></canvas>
-                </div>
-              </div>
-            </div>
-          `);
-
-          // กำหนดให้สร้างกราฟหลังจาก DOM ถูกสร้าง
-          setTimeout(() => this.createCharts(data), 100);
-        }
-      } catch (error) {
-        console.error('Error parsing comparison table data:', error);
-      }
-    }
-
+    // ... (rest of the function, potentially removed or refactored) ...
     return cards.join('');
   }
 
   createCharts(data) {
-    if (!window.Chart) {
-      console.error('Chart.js not loaded');
-      return;
-    }
-
-    // สร้างกราฟความคล้ายคลึง
-    const similarityCtx = document.getElementById('similarityChart');
-    if (similarityCtx) {
-      // จัดเรียงข้อมูลตามค่าความคล้ายคลึง
-      const sortedData = [...data].sort((a, b) => b.top_similarity - a.top_similarity);
-      const top5Data = sortedData.slice(0, 5);
-
-      new Chart(similarityCtx, {
-        type: 'bar',
-        data: {
-          labels: top5Data.map(item => item.input_doc.split('.')[0]),
-          datasets: [{
-            label: 'ความคล้ายคลึง (%)',
-            data: top5Data.map(item => item.top_similarity),
-            backgroundColor: 'rgba(59, 130, 246, 0.5)',
-            borderColor: 'rgb(59, 130, 246)',
-            borderWidth: 1
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: {
-              display: true,
-              position: 'top'
-            }
-          },
-          scales: {
-            y: {
-              beginAtZero: true,
-              max: 100
-            }
-          }
-        }
-      });
-    }
-
-    // สร้างกราฟการกระจายตัวของประเภท
-    const genreCtx = document.getElementById('genreChart');
-    if (genreCtx) {
-      // นับจำนวนแต่ละประเภท
-      const genreCounts = data.reduce((acc, item) => {
-        const genre = item.top_genre || 'ไม่ระบุ';
-        acc[genre] = (acc[genre] || 0) + 1;
-        return acc;
-      }, {});
-
-      new Chart(genreCtx, {
-        type: 'doughnut',
-        data: {
-          labels: Object.keys(genreCounts),
-          datasets: [{
-            data: Object.values(genreCounts),
-            backgroundColor: [
-              'rgba(59, 130, 246, 0.5)',
-              'rgba(16, 185, 129, 0.5)',
-              'rgba(245, 158, 11, 0.5)',
-              'rgba(239, 68, 68, 0.5)',
-              'rgba(139, 92, 246, 0.5)'
-            ]
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: {
-              position: 'right'
-            }
-          }
-        }
-      });
-    }
+     // This function seems unused now as charts are within specific cards
+    // Kept for potential future use or reference
+    // ... (rest of the function, potentially removed or refactored) ...
   }
 
   generateVisualizationCard(type, imgSrc, data) {
-    const titles = {
-      heatmap: '🔥 แผนที่ความร้อนความคล้ายคลึง (Similarity Heatmap)',
-      network: '🕸️ กราฟเครือข่ายความสัมพันธ์ (Network Graph)'
-    };
-
-    const descriptions = {
-      heatmap: `
-        <strong>คำอธิบาย:</strong> แผนที่ความร้อนแสดงค่าความคล้ายคลึง (Cosine Similarity) ระหว่างไฟล์อินพุตกับเอกสารในฐานข้อมูลทุกตัว 
-        <br>• <strong>สีแดงเข้ม:</strong> ค่าความคล้ายสูง (ใกล้ 1.0) - เนื้อหาคล้ายคลึงมาก
-        <br>• <strong>สีเหลือง:</strong> ค่าความคล้ายปานกลาง (0.5-0.7) - มีความคล้ายบางส่วน  
-        <br>• <strong>สีน้ำเงิน:</strong> ค่าความคล้ายต่ำ (ใกล้ 0.0) - เนื้อหาแตกต่างกัน
-      `,
-      network: `
-        <strong>คำอธิบาย:</strong> กราฟแสดงความสัมพันธ์ระหว่างไฟล์อินพุต (ซ้าย) กับไฟล์ในฐานข้อมูลที่คล้ายที่สุด (ขวา)
-        <br>• <strong>สี่เหลี่ยม:</strong> ไฟล์ที่นำมาวิเคราะห์
-        <br>• <strong>วงกลม:</strong> ไฟล์ในฐานข้อมูลที่คล้ายคลึง
-        <br>• <strong>เส้นเชื่อม:</strong> ความหนาแสดงระดับความคล้ายคลึง
-      `
-    };
-
-    const bgColors = {
-      heatmap: 'bg-red-50 border-red-200 text-red-800',
-      network: 'bg-blue-50 border-blue-200 text-blue-800'
-    };
-
-    return `
-      <div class="result-card">
-        <h3><i class="fas fa-${type === 'heatmap' ? 'fire' : 'project-diagram'}"></i>${titles[type]}</h3>
-        <div class="${bgColors[type]} border rounded-lg p-4 mb-4">
-          <p class="text-sm">
-            <i class="fas fa-info-circle mr-2"></i>
-            ${descriptions[type]}
-          </p>
-        </div>
-        <div class="text-center">
-          <img src="${imgSrc}" alt="${titles[type]}" 
-               class="max-w-full h-auto mx-auto border-2 border-gray-300 rounded-lg shadow-md hover:shadow-lg transition-shadow" 
-               onclick="analyzer.openImageModal(this)" 
-               style="cursor: pointer;" />
-        </div>
-        ${data.url ? `<a href="${this.apiBaseUrl ? this.apiBaseUrl + data.url : data.url}" 
-                      download="${type === 'heatmap' ? 'similarity_heatmap.png' : 'network_top_matches.png'}" 
-                      class="download-btn mt-4">
-                      <i class="fas fa-download"></i>ดาวน์โหลดรูปภาพ
-                   </a>` : ''}
-      </div>
-    `;
+    // This function seems unused now as Plotly rendering is separate
+    // Kept for potential future use or reference (e.g., fallback PNG display)
+    // ... (rest of the function, potentially removed or refactored) ...
   }
 
   generateNetworkCard(networkData) {
-    if (!networkData || !networkData.data) {
-      console.log('No network data available');
-      return '';
+    // Check if networkData or its data attribute is missing
+     if (!networkData || !networkData.data) {
+        console.warn('Network graph card skipped: No networkData or networkData.data found.');
+        return ''; // Return empty string if no data to render
     }
     
     // Generate unique ID for the plot container
     const plotId = 'network-plot-' + Date.now();
     
-    // Store data and plotId for rendering
+    // Store data and plotId for rendering later
     this.pendingNetwork = {
-      data: networkData.data,
-      plotId: plotId
+        data: networkData.data,
+        plotId: plotId
     };
     
+    // Always render the container div for Plotly
     return `
       <div class="result-card">
         <h3><i class="fas fa-project-diagram"></i>🕸️ กราฟเครือข่ายความสัมพันธ์ (Network Graph)</h3>
@@ -1316,90 +1265,15 @@ class NovelSimilarityAnalyzer {
             <br>• <i class="fas fa-mouse-pointer"></i> เลื่อนเมาส์เหนือโหนดหรือเส้นเชื่อมเพื่อดูรายละเอียด
           </p>
         </div>
-        <div class="w-full bg-white rounded-lg border p-4">
-          <div id="${plotId}" class="w-full h-[600px]"></div>
+        <div class="w-full bg-white rounded-lg border p-4 overflow-hidden"> 
+          <div id="${plotId}" class="w-full h-[600px] plot-container"></div> 
         </div>
-        ${networkData.url ? `
+        ${networkData.url ? ` 
           <div class="mt-4 text-right">
             <a href="${this.apiBaseUrl ? this.apiBaseUrl + networkData.url : networkData.url}" 
-               download class="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
-              <i class="fas fa-download mr-2"></i>ดาวน์โหลดรูปภาพ
+               download="network_top_matches.png" class="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
+              <i class="fas fa-download mr-2"></i>ดาวน์โหลดรูปภาพ (PNG)
             </a>
-          </div>
-        ` : ''}
-      </div>
-    `;
-    
-    // Store network data for tooltip use
-    this.networkData = networkData.data;
-    
-    // Prepare nodes and edges information
-    const nodes = networkData.data?.nodes || [];
-    const edges = networkData.data?.edges || [];
-    console.log('Network data:', networkData);
-    
-    // Use URL if available
-    const imgUrl = networkData.url;
-    if (imgUrl) {
-      const fullUrl = this.apiBaseUrl ? `${this.apiBaseUrl}${imgUrl}` : imgUrl;
-      console.log('Using network URL:', fullUrl);
-      return this.generateVisualizationCard('network', fullUrl, networkData);
-    }
-    
-    // Fallback to base64
-    if (networkData.base64) {
-      console.log('Using network base64 data');
-      return this.generateVisualizationCard('network', networkData.base64, networkData);
-    }
-    
-    console.log('No image source found for network graph');
-    return '';
-    
-    return `
-      <div class="result-card">
-        <h3><i class="fas fa-project-diagram"></i>🔗 แผนภูมิเครือข่าย (Network Graph)</h3>
-        <div class="bg-indigo-50 border border-indigo-200 rounded-lg p-4 mb-4">
-          <p class="text-indigo-800 text-sm">
-            <i class="fas fa-info-circle mr-2"></i>
-            <strong>คำอธิบาย:</strong> แผนภูมิเครือข่ายแสดงความสัมพันธ์ระหว่างไฟล์อินพุต (ฝั่งซ้าย) กับเอกสารที่คล้ายคลึงที่สุด Top-K ตัว (ฝั่งขวา)
-            <br>• <strong>🟦 สี่เหลี่ยม:</strong> ไฟล์อินพุตที่นำมาวิเคราะห์
-            <br>• <strong>🔵 วงกลม:</strong> เอกสารในฐานข้อมูลที่มีความคล้ายคลึงสูง
-            <br>• <strong>เส้นเชื่อม:</strong> ความหนาของเส้นแสดงระดับความคล้าย (หนา = คล้ายมาก)
-            <br>• คลิกที่รูปภาพเพื่อดูขนาดเต็ม
-          </p>
-        </div>
-        <div class="text-center relative group">
-          <div class="network-container relative overflow-auto max-h-[600px] rounded-lg border-2 border-gray-300">
-            <img 
-              src="${imgSrc}" 
-              alt="Network Diagram" 
-              class="result-image mx-auto hover:shadow-lg transition-shadow cursor-pointer"
-              onclick="analyzer.openImageModal(this)"
-              onmousemove="analyzer.showNetworkTooltip(event)"
-              onmouseleave="analyzer.hideTooltip()"
-              data-tooltip="true"
-            />
-            <div class="absolute top-2 right-2 z-10 space-x-2">
-              <button class="bg-white p-2 rounded-full shadow hover:shadow-lg transition-shadow text-gray-600 hover:text-gray-800" onclick="analyzer.zoomInNetwork()">
-                <i class="fas fa-search-plus"></i>
-              </button>
-              <button class="bg-white p-2 rounded-full shadow hover:shadow-lg transition-shadow text-gray-600 hover:text-gray-800" onclick="analyzer.zoomOutNetwork()">
-                <i class="fas fa-search-minus"></i>
-              </button>
-              <button class="bg-white p-2 rounded-full shadow hover:shadow-lg transition-shadow text-gray-600 hover:text-gray-800" onclick="analyzer.resetNetworkZoom()">
-                <i class="fas fa-undo"></i>
-              </button>
-            </div>
-          </div>
-        </div>
-        ${networkData.url ? `
-          <div class="flex justify-between items-center mt-4">
-            <a href="${this.apiBaseUrl ? this.apiBaseUrl + networkData.url : networkData.url}" download class="download-btn">
-              <i class="fas fa-download"></i>ดาวน์โหลดรูปภาพ
-            </a>
-            <span class="text-sm text-gray-500">
-              <i class="fas fa-info-circle mr-1"></i>เลื่อนเมาส์ไปที่โหนดเพื่อดูรายละเอียด
-            </span>
           </div>
         ` : ''}
       </div>
@@ -1412,26 +1286,41 @@ class NovelSimilarityAnalyzer {
     // Load CSV data for similarity matrix
     this.loadSimilarityMatrix();
 
-    // Render any pending visualizations
-    if (this.pendingHeatmap) {
-      this.renderHeatmap(this.pendingHeatmap.plotId, this.pendingHeatmap.data);
-    }
-    if (this.pendingNetwork) {
-      this.renderNetwork(this.pendingNetwork.plotId, this.pendingNetwork.data);
+    // Render visualizations if Plotly is ready and data is pending
+    if (this.plotlyLoaded) {
+      if (this.pendingHeatmap) {
+        this.renderHeatmap(this.pendingHeatmap.plotId, this.pendingHeatmap.data);
+      }
+      if (this.pendingNetwork) {
+        this.renderNetwork(this.pendingNetwork.plotId, this.pendingNetwork.data);
+      }
+    } else {
+        console.log("Plotly not yet loaded, deferring visualization rendering.");
     }
   }
 
   renderHeatmap(plotId, data) {
     if (!window.Plotly || !data) {
       console.log('Deferring heatmap render - Plotly not ready or no data');
-      this.pendingHeatmap = { plotId: plotId, data: data };
+      this.pendingHeatmap = { plotId: plotId, data: data }; // Keep pending if Plotly not loaded
       return;
     }
+    this.pendingHeatmap = null; // Clear pending data
+
+    var plotElement = document.getElementById(plotId);
+     if (!plotElement) {
+       console.error('Heatmap container element not found:', plotId);
+       return; // Exit if container doesn't exist in DOM yet
+     }
 
     var x_labels = data.x_labels || [];
     var y_labels = data.y_labels || [];
     var values = data.values || [];
-    if (x_labels.length === 0 || y_labels.length === 0 || values.length === 0) return;
+    if (x_labels.length === 0 || y_labels.length === 0 || values.length === 0) {
+        console.warn("Cannot render heatmap: Missing x_labels, y_labels, or values.");
+        plotElement.innerHTML = '<p class="text-red-500">ข้อมูลสำหรับ Heatmap ไม่สมบูรณ์</p>';
+        return;
+    }
 
     const heatmapTrace = {
       x: x_labels,
@@ -1439,78 +1328,92 @@ class NovelSimilarityAnalyzer {
       z: values,
       type: 'heatmap',
       colorscale: [
-        [0, 'rgb(0,0,255)'],      // Blue for low values
-        [0.5, 'rgb(255,255,0)'],  // Yellow for medium values
-        [1, 'rgb(255,0,0)']       // Red for high values
+        [0, 'rgb(68,1,84)'], // Dark purple (low)
+        [0.25, 'rgb(59,82,139)'], // Blue
+        [0.5, 'rgb(33,145,140)'], // Teal
+        [0.75, 'rgb(94,201,98)'], // Green
+        [1, 'rgb(253,231,37)'] // Yellow (high) - Viridis scale
       ],
       hoverongaps: false,
       hovertemplate: 
         '<b>Input:</b> %{y}<br>' +
         '<b>Database:</b> %{x}<br>' +
-        '<b>ความคล้าย:</b> %{z:.1%}<br>' +
-        '<extra></extra>'
+        '<b>ความคล้าย:</b> %{z:.1%}<br>' + // Display as percentage
+        '<extra></extra>' // Hide extra hover info
     };
 
     const layout = {
-      title: 'แผนที่ความร้อนแสดงความคล้ายคลึง',
+      // title: 'แผนที่ความร้อนแสดงความคล้ายคลึง', // Title is already in the card
       xaxis: {
-        title: 'เอกสารในฐานข้อมูล',
+        // title: 'เอกสารในฐานข้อมูล', // Keep axis titles concise
         tickangle: -45,
-        automargin: true
+        automargin: true,
+        tickfont: { size: 9 } // Smaller font for axis labels
       },
       yaxis: {
-        title: 'ไฟล์อินพุต',
-        automargin: true
+        // title: 'ไฟล์อินพุต',
+        automargin: true,
+        tickfont: { size: 9 }
       },
-      margin: {
-        l: 150,
-        r: 50,
-        b: 150,
-        t: 50,
+      margin: { // Adjust margins for labels
+        l: 150, // Increase left margin for potentially long input names
+        r: 30,
+        b: 150, // Increase bottom margin for rotated db names
+        t: 30,
         pad: 4
-      }
+      },
+      autosize: true // Let Plotly manage size within container
     };
 
     const config = {
       responsive: true,
-      displayModeBar: true,
-      modeBarButtons: [[
-        'zoom2d',
-        'pan2d',
-        'resetScale2d',
-        'toImage'
-      ]],
+      displayModeBar: true, // Show Plotly tools (zoom, pan, download)
+      modeBarButtonsToRemove: ['select2d', 'lasso2d'], // Remove selection tools
       displaylogo: false,
-      locale: 'th'
+      locale: 'th' // Use Thai locale if needed for tooltips/buttons
     };
 
     try {
-      var plotElement = document.getElementById(plotId);
-      if (!plotElement) {
-        console.error('Heatmap container not found:', plotId);
-        return;
-      }
       console.log('Rendering heatmap in element:', plotId);
       Plotly.newPlot(plotId, [heatmapTrace], layout, config).then(function() {
         console.log('Heatmap rendered successfully');
+        // Add event listener for window resize to relayout
+        window.addEventListener('resize', function() { 
+            if(document.getElementById(plotId)) { // Check if element still exists
+                Plotly.Plots.resize(plotElement); 
+            }
+        });
       }).catch(function(err) {
-        console.error('Failed to render heatmap:', err);
+        console.error('Failed to render heatmap with Plotly:', err);
+        plotElement.innerHTML = '<p class="text-red-500">เกิดข้อผิดพลาดในการสร้าง Heatmap</p>';
       });
     } catch (error) {
-      console.error('Error rendering heatmap:', error);
+      console.error('Error during Plotly.newPlot for heatmap:', error);
+       plotElement.innerHTML = '<p class="text-red-500">เกิดข้อผิดพลาดในการสร้าง Heatmap</p>';
     }
   }
 
   renderNetwork(plotId, data) {
     if (!window.Plotly || !data) {
       console.log('Deferring network render - Plotly not ready or no data');
-      this.pendingNetwork = { plotId: plotId, data: data };
+      this.pendingNetwork = { plotId: plotId, data: data }; // Keep pending
       return;
     }
+     this.pendingNetwork = null; // Clear pending data
+
+     var plotElement = document.getElementById(plotId);
+     if (!plotElement) {
+       console.error('Network graph container element not found:', plotId);
+       return;
+     }
 
     var nodes = data.nodes || [];
     var edges = data.edges || [];
-    if (nodes.length === 0 || edges.length === 0) return;
+    if (nodes.length === 0) { // Edges might be empty if K=0 or no matches
+        console.warn("Cannot render network graph: No nodes found in data.");
+        plotElement.innerHTML = '<p class="text-red-500">ข้อมูลสำหรับ Network Graph ไม่สมบูรณ์ (ไม่พบโหนด)</p>';
+        return;
+    }
 
     // Separate input and database nodes
     const inputNodes = nodes.filter(node => node.is_input);
@@ -1518,366 +1421,278 @@ class NovelSimilarityAnalyzer {
 
     // Create x-coordinates (inputs on left, db on right)
     const xCoords = {};
-    inputNodes.forEach((node, i) => {
-      xCoords[node.id] = -5;  // Left side
-    });
-    dbNodes.forEach((node, i) => {
-      xCoords[node.id] = 5;   // Right side
-    });
-
-    // Create y-coordinates evenly spaced
     const yCoords = {};
+    const nodeLookup = {}; // For quick access by ID
+
+    // Position Input Nodes
+    const inputYStep = inputNodes.length > 1 ? 4 / (inputNodes.length - 1) : 0; // Spread Y from -2 to 2
     inputNodes.forEach((node, i) => {
-      yCoords[node.id] = (i - (inputNodes.length - 1) / 2) * 2;
-    });
-    dbNodes.forEach((node, i) => {
-      yCoords[node.id] = (i - (dbNodes.length - 1) / 2) * 2;
+      const yPos = inputNodes.length === 1 ? 0 : -2 + i * inputYStep;
+      xCoords[node.id] = -5;  // Left side
+      yCoords[node.id] = yPos;
+      nodeLookup[node.id] = node;
     });
 
-    // Create node trace with improved styling
+    // Position DB Nodes
+    const dbYStep = dbNodes.length > 1 ? 4 / (dbNodes.length - 1) : 0; // Spread Y from -2 to 2
+    dbNodes.forEach((node, i) => {
+       const yPos = dbNodes.length === 1 ? 0 : -2 + i * dbYStep;
+      xCoords[node.id] = 5;   // Right side
+      yCoords[node.id] = yPos;
+      nodeLookup[node.id] = node;
+    });
+
+
+    // --- START FIX FOR MISSING LINES ---
+    // สร้าง Trace เดียวสำหรับ "เส้น" ทั้งหมด
+    const edgeX = [];
+    const edgeY = [];
+    const edgeHoverText = [];
+    edges.forEach(edge => {
+        const sourceNode = nodeLookup[edge.source]; // Get full node object
+        const targetNode = nodeLookup[edge.target]; // Get full node object
+        
+        if (sourceNode && targetNode) {
+            edgeX.push(xCoords[edge.source], xCoords[edge.target], null); // Add null to break the line
+            edgeY.push(yCoords[edge.source], yCoords[edge.target], null);
+            edgeHoverText.push(
+                '', // No text for start point
+                 // Combine info for line tooltip
+                `<b>${sourceNode.label}</b><br>↔️ <b>${targetNode.label}</b><br>ความคล้าย: ${(edge.weight * 100).toFixed(1)}%`,
+                ''  // No text for null break
+            );
+        }
+    });
+
+    const edgeTrace = {
+        type: 'scatter',
+        mode: 'lines',
+        x: edgeX,
+        y: edgeY,
+        line: {
+            color: 'rgb(180,180,180)',
+            width: 1 // Keep lines thin
+        },
+        hoverinfo: 'text', // Show hover text defined below
+        text: edgeHoverText, // Use calculated hover text
+        hoverlabel: { bgcolor: 'rgba(0,0,0,0.7)', font: { color: 'white' } } // Darker tooltip for lines
+    };
+    // --- END FIX FOR MISSING LINES ---
+
+
+    // Create node trace (single trace for all nodes)
     var nodeTrace = {
       x: nodes.map(node => xCoords[node.id]),
       y: nodes.map(node => yCoords[node.id]),
-      mode: 'markers+text',
+      mode: 'markers+text', // Show markers and labels beside them
       type: 'scatter',
       name: 'Nodes',
-      text: nodes.map(node => node.label),
+      text: nodes.map(node => node.label), // Text to display next to marker
       textposition: nodes.map(node => 
-        node.is_input ? 'middle left' : 'middle right'
+        node.is_input ? 'middle left' : 'middle right' // Position text relative to marker
       ),
+      textfont: {
+          size: 10 // Smaller font for node labels on plot
+      },
       marker: {
-        size: 20,
+        size: 15, // Slightly smaller markers
         color: nodes.map(node => 
-          node.is_input ? 'rgb(66, 135, 245)' : 'rgb(245, 171, 66)'
+          node.is_input ? 'rgb(66, 135, 245)' : 'rgb(245, 171, 66)' // Blue for input, Orange for DB
         ),
         symbol: nodes.map(node => 
           node.is_input ? 'square' : 'circle'
         )
       },
-      hovertemplate:
-        '<b>%{text}</b><br>' +
-        '<extra></extra>'
+      hoverinfo: 'text', // Use hovertext defined below
+      hovertext: nodes.map(node => node.label), // Tooltip text is the full label
+      hoverlabel: { bgcolor: 'rgba(0,0,0,0.8)', font: { color: 'white' } } // Darker tooltip for nodes
     };
 
-    // Create edge traces
-    const edgeTraces = edges.map(edge => ({
-      type: 'scatter',
-      x: [xCoords[edge.source], xCoords[edge.target]],
-      y: [yCoords[edge.source], yCoords[edge.target]],
-      mode: 'lines',
-      line: {
-        color: 'rgb(180,180,180)',
-        width: edge.weight * 5  // Line width based on similarity
-      },
-      hovertemplate:
-        `<b>ความคล้าย:</b> ${(edge.weight * 100).toFixed(1)}%<br>` +
-        '<extra></extra>'
-    }));
 
     const layout = {
       showlegend: false,
-      hovermode: 'closest',
-      title: 'กราฟเครือข่ายความสัมพันธ์',
+      hovermode: 'closest', // Show tooltip for the nearest item
+      // title: 'กราฟเครือข่ายความสัมพันธ์', // Title already in card
       xaxis: {
-        visible: false,
-        range: [-6, 6]
+        visible: false, // Hide axis lines and ticks
+        // --- START FIX FOR LABELS CUT OFF ---
+        range: [-8, 8] // ขยายขอบเขตแกน X
+        // --- END FIX ---
       },
       yaxis: {
         visible: false,
-        range: [-6, 6]
+        // Adjust Y range based on max nodes, add padding
+        range: [
+            Math.min(0, ...Object.values(yCoords).filter(y => !isNaN(y))) - 0.5, // Ensure 0 is included, filter NaNs
+            Math.max(0, ...Object.values(yCoords).filter(y => !isNaN(y))) + 0.5
+        ]
       },
-      margin: {
-        l: 20,
-        r: 20,
-        b: 20,
-        t: 40
-      }
+      margin: { l: 20, r: 20, b: 20, t: 40 }, // Minimal margins
+      autosize: true
     };
 
     const config = {
       responsive: true,
       displayModeBar: true,
-      modeBarButtons: [[
-        'zoom2d',
-        'pan2d',
-        'resetScale2d',
-        'toImage'
-      ]],
+      modeBarButtonsToRemove: ['select2d', 'lasso2d'],
       displaylogo: false,
       locale: 'th'
     };
 
     try {
-      var plotElement = document.getElementById(plotId);
-      if (!plotElement) {
-        console.error('Network graph container not found:', plotId);
-        return;
-      }
       console.log('Rendering network graph in element:', plotId);
-      Plotly.newPlot(plotId, [nodeTrace, ...edgeTraces], layout, config).then(function() {
+      // --- FIX: Plot edgeTrace (object) not edgeTraces (array) ---
+      Plotly.newPlot(plotId, [edgeTrace, nodeTrace], layout, config).then(function() {
+      // --- END FIX ---
         console.log('Network graph rendered successfully');
+         window.addEventListener('resize', function() {
+              if(document.getElementById(plotId)) { // Check if element still exists
+                Plotly.Plots.resize(plotElement); 
+              }
+         });
       }).catch(function(err) {
-        console.error('Failed to render network graph:', err);
+        console.error('Failed to render network graph with Plotly:', err);
+         plotElement.innerHTML = '<p class="text-red-500">เกิดข้อผิดพลาดในการสร้าง Network Graph</p>';
       });
     } catch (error) {
-      console.error('Error rendering network graph:', error);
+      console.error('Error during Plotly.newPlot for network graph:', error);
+       plotElement.innerHTML = '<p class="text-red-500">เกิดข้อผิดพลาดในการสร้าง Network Graph</p>';
     }
   }
 
-  // Tooltip handling
-  showTooltip(event) {
-    if (!event.target.dataset.tooltip) return;
-    
-    const rect = event.target.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-    
-    // Get filename based on coordinates
-    const fullName = this.getFileNameFromCoordinates(x, y, rect);
-    if (!fullName) return;
-    
-    this.tooltip.innerHTML = fullName;
-    this.tooltip.style.left = `${event.pageX + 10}px`;
-    this.tooltip.style.top = `${event.pageY + 10}px`;
-    this.tooltip.classList.remove('hidden');
-  }
-
-  hideTooltip() {
-    this.tooltip.classList.add('hidden');
-  }
-
-  getFileNameFromCoordinates(x, y, rect) {
-    if (!this.heatmapData) return null;
-    
-    const { x_labels, y_labels, values } = this.heatmapData;
-    if (!x_labels || !y_labels || !values) return null;
-    
-    // Calculate relative position (0-1)
-    const relX = x / rect.width;
-    const relY = y / rect.height;
-    
-    // Get label index based on position
-    const xIndex = Math.floor(relX * x_labels.length);
-    const yIndex = Math.floor(relY * y_labels.length);
-    
-    // Get labels
-    const xLabel = x_labels[xIndex];
-    const yLabel = y_labels[yIndex];
-    
-    // Get similarity value
-    const similarity = values[yIndex]?.[xIndex];
-    
-    if (!xLabel || !yLabel) return null;
-    
-    return `
-      <div class="font-medium">${yLabel}</div>
-      <div class="text-xs text-gray-300">กับ</div>
-      <div class="font-medium">${xLabel}</div>
-      ${similarity !== undefined ? 
-        `<div class="text-xs mt-1">
-          <span class="font-medium ${similarity >= 0.7 ? 'text-green-400' : similarity >= 0.5 ? 'text-yellow-400' : 'text-blue-400'}">
-            ความคล้าย: ${(similarity * 100).toFixed(1)}%
-          </span>
-        </div>` : ''
-      }
-    `;
-  }
-
-  // Zoom handling
-  zoomIn() {
-    this.currentZoom = Math.min(this.currentZoom * 1.2, 3);
-    this.applyZoom();
-  }
-
-  zoomOut() {
-    this.currentZoom = Math.max(this.currentZoom / 1.2, 0.5);
-    this.applyZoom();
-  }
-
-  resetZoom() {
-    this.currentZoom = 1;
-    this.applyZoom();
-  }
-
-  applyZoom() {
-    const container = document.querySelector('.heatmap-container');
-    if (!container) return;
-    
-    const img = container.querySelector('img');
-    if (!img) return;
-    
-    img.style.transform = `scale(${this.currentZoom})`;
-    img.style.transformOrigin = 'center';
-    container.style.height = Math.min(600, img.naturalHeight * this.currentZoom) + 'px';
-  }
-
-  // Network-specific tooltip
-  showNetworkTooltip(event) {
-    if (!event.target.dataset.tooltip) return;
-    
-    const rect = event.target.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-    
-    // Get node info based on coordinates
-    const nodeInfo = this.getNodeInfoFromCoordinates(x, y, rect);
-    if (!nodeInfo) return;
-    
-    this.tooltip.innerHTML = `
-      <div class="font-medium">${nodeInfo.title}</div>
-      ${nodeInfo.details ? `
-        <div class="text-xs mt-1 text-gray-300">
-          ${nodeInfo.details}
-        </div>
-      ` : ''}
-    `;
-    
-    this.tooltip.style.left = `${event.pageX + 10}px`;
-    this.tooltip.style.top = `${event.pageY + 10}px`;
-    this.tooltip.classList.remove('hidden');
-  }
-
-  getNodeInfoFromCoordinates(x, y, rect) {
-    if (!this.networkData || !this.networkData.nodes) return null;
-    
-    // Calculate relative position (0-1)
-    const relX = x / rect.width;
-    const relY = y / rect.height;
-    
-    // Determine which side the click is on (left = input, right = database)
-    const isLeftSide = relX < 0.5;
-    
-    // Filter nodes based on side
-    const relevantNodes = this.networkData.nodes.filter(node => 
-      isLeftSide ? node.is_input : !node.is_input
-    );
-    
-    // Find the nearest node based on Y position
-    const nodeIndex = Math.floor(relY * relevantNodes.length);
-    const node = relevantNodes[nodeIndex];
-    
-    if (!node) return null;
-    
-    // Get edges for this node
-    const edges = this.networkData.edges.filter(edge => 
-      isLeftSide ? edge.source === node.id : edge.target === node.id
-    );
-    
-    // Format edge information
-    const edgeInfo = edges.map(edge => {
-      const connectedNodeId = isLeftSide ? edge.target : edge.source;
-      const connectedNode = this.networkData.nodes.find(n => n.id === connectedNodeId);
-      return `${connectedNode?.label || connectedNodeId}: ${(edge.weight * 100).toFixed(1)}% คล้าย`;
-    }).join('<br>');
-    
-    return {
-      title: node.label,
-      details: edges.length > 0 ? `การเชื่อมโยง:<br>${edgeInfo}` : 'ไม่มีการเชื่อมโยง'
-    };
-  }
-
-  // Network zoom handling
-  zoomInNetwork() {
-    this.networkZoom = (this.networkZoom || 1) * 1.2;
-    this.applyNetworkZoom();
-  }
-
-  zoomOutNetwork() {
-    this.networkZoom = (this.networkZoom || 1) / 1.2;
-    this.applyNetworkZoom();
-  }
-
-  resetNetworkZoom() {
-    this.networkZoom = 1;
-    this.applyNetworkZoom();
-  }
-
-  applyNetworkZoom() {
-    const container = document.querySelector('.network-container');
-    if (!container) return;
-    
-    const img = container.querySelector('img');
-    if (!img) return;
-    
-    img.style.transform = `scale(${this.networkZoom})`;
-    img.style.transformOrigin = 'center';
-    container.style.height = Math.min(600, img.naturalHeight * this.networkZoom) + 'px';
-  }
-
+  // --- START: ADDED FUNCTIONS (loadComparisonTable, loadSimilarityMatrix, getCSVUrl, parseCSVToTable, formatCellValue) ---
+  
   async loadComparisonTable() {
     const container = document.getElementById('comparisonTableContainer');
-    if (!container) return;
+    if (!container) {
+        console.warn('loadComparisonTable: Container not found');
+        return;
+    }
 
     try {
-      // Find comparison table data from results
-      const tableElement = document.querySelector('[data-csv-url]');
-      if (!tableElement) {
-        // Try to get from stored results data
-        const csvUrl = this.getCSVUrl('comparison_table');
-        if (csvUrl) {
-          const response = await axios.get(csvUrl);
-          const csvData = response.data;
-          const tableHTML = this.parseCSVToTable(csvData);
-          container.innerHTML = tableHTML;
+      const csvUrl = this.getCSVUrl('comparison_table');
+      if (csvUrl) {
+        console.log('Loading Comparison Table from:', csvUrl);
+        // Use axios if available
+        if (window.axios) {
+            const response = await axios.get(csvUrl);
+            const csvData = response.data;
+            const tableHTML = this.parseCSVToTable(csvData);
+            container.innerHTML = tableHTML;
         } else {
-          container.innerHTML = '<p class="text-gray-600">ไม่พบข้อมูลตารางเปรียบเทียบ</p>';
+             // Fallback to fetch
+            console.log('Axios not found, using fetch for Comparison Table');
+            const response = await fetch(csvUrl);
+            if (!response.ok) throw new Error(`Failed to fetch CSV: ${response.status} ${response.statusText}`);
+            const csvData = await response.text();
+            const tableHTML = this.parseCSVToTable(csvData);
+            container.innerHTML = tableHTML;
         }
+      } else {
+        console.warn('No CSV URL found for comparison_table');
+        container.innerHTML = '<p class="text-gray-600">ไม่พบข้อมูลตารางเปรียบเทียบ (No URL)</p>';
       }
     } catch (error) {
       console.error('Error loading comparison table:', error);
-      container.innerHTML = '<p class="text-red-600">เกิดข้อผิดพลาดในการโหลดตารางเปรียบเทียบ</p>';
+      container.innerHTML = `<p class="text-red-600">เกิดข้อผิดพลาดในการโหลดตารางเปรียบเทียบ: ${error.message}</p>`;
     }
   }
 
   async loadSimilarityMatrix() {
     const container = document.getElementById('similarityMatrixContainer');
-    if (!container) return;
+    if (!container) {
+         console.warn('loadSimilarityMatrix: Container not found');
+         return;
+    }
 
     try {
       const csvUrl = this.getCSVUrl('similarity_matrix');
       if (csvUrl) {
-        const response = await axios.get(csvUrl);
-        const csvData = response.data;
-        const tableHTML = this.parseCSVToTable(csvData);
-        container.innerHTML = tableHTML;
+         console.log('Loading Similarity Matrix from:', csvUrl);
+         if (window.axios) {
+            const response = await axios.get(csvUrl);
+            const csvData = response.data;
+            const tableHTML = this.parseCSVToTable(csvData);
+            container.innerHTML = tableHTML;
+         } else {
+             console.log('Axios not found, using fetch for Similarity Matrix');
+             const response = await fetch(csvUrl);
+             if (!response.ok) throw new Error(`Failed to fetch CSV: ${response.status} ${response.statusText}`);
+             const csvData = await response.text();
+             const tableHTML = this.parseCSVToTable(csvData);
+             container.innerHTML = tableHTML;
+         }
       } else {
-        container.innerHTML = '<p class="text-gray-600">ไม่พบข้อมูลเมทริกซ์ความคล้ายคลึง</p>';
+        console.warn('No CSV URL found for similarity_matrix');
+        container.innerHTML = '<p class="text-gray-600">ไม่พบข้อมูลเมทริกซ์ความคล้ายคลึง (No URL)</p>';
       }
     } catch (error) {
       console.error('Error loading similarity matrix:', error);
-      container.innerHTML = '<p class="text-red-600">เกิดข้อผิดพลาดในการโหลดเมทริกซ์ความคล้ายคลึง</p>';
+      container.innerHTML = `<p class="text-red-600">เกิดข้อผิดพลาดในการโหลดเมทริกซ์: ${error.message}</p>`;
     }
   }
 
   getCSVUrl(fileKey) {
     // Get CSV URL from stored results data
-    if (this.currentResults && this.currentResults.results && this.currentResults.results[fileKey]) {
-      return this.apiBaseUrl ? `${this.apiBaseUrl}${this.currentResults.results[fileKey].url}` : this.currentResults.results[fileKey].url;
+    if (this.currentResults && this.currentResults.results && this.currentResults.results[fileKey] && this.currentResults.results[fileKey].url) {
+      // Ensure the URL is absolute
+      let url = this.currentResults.results[fileKey].url;
+       if (url.startsWith('/')) { // If it's a relative path
+           return this.apiBaseUrl ? `${this.apiBaseUrl}${url}` : url;
+       }
+       return url; // Assume it's already absolute if it doesn't start with / (less likely)
     }
+    console.warn(`getCSVUrl: No URL found for key '${fileKey}' in currentResults.`);
     return null;
   }
 
   parseCSVToTable(csvData) {
+    if (!csvData || typeof csvData !== 'string' || csvData.trim().length === 0) {
+       return '<p class="text-gray-600">ไม่มีข้อมูลในไฟล์ CSV</p>';
+    }
+    
     const lines = csvData.trim().split('\n');
     if (lines.length === 0) return '<p class="text-gray-600">ไม่มีข้อมูล</p>';
 
-    let html = '<div class="overflow-x-auto"><table class="min-w-full bg-white border border-gray-200 rounded-lg">';
+    // Use a sticky container for horizontal scroll + sticky header
+    let html = '<div class="overflow-x-auto relative border border-gray-200 rounded-lg" style="max-height: 500px; overflow-y: auto;">';
+    html += '<table class="min-w-full bg-white divide-y divide-gray-200">';
     
+    let headers = []; // Store header names
+    if (lines.length > 0) {
+      headers = this.parseCSVLine(lines[0].trim()); // Get headers from the first line, trim it
+    }
+
     lines.forEach((line, index) => {
-      // Handle CSV parsing with proper quote handling
-      const cells = this.parseCSVLine(line);
+      // Skip empty lines
+      const trimmedLine = line.trim();
+      if (!trimmedLine) return;
+
+      const cells = this.parseCSVLine(trimmedLine);
+      
+      // Ensure cell count matches header count if not header row
+      if (index > 0 && cells.length !== headers.length) {
+          console.warn(`Skipping malformed CSV line ${index + 1}: expected ${headers.length} cells, got ${cells.length}. Line: ${trimmedLine}`);
+          return; // Skip row
+      }
+
       const tagName = index === 0 ? 'th' : 'td';
-      const rowClass = index === 0 ? 'bg-gradient-to-r from-blue-50 to-indigo-50 font-semibold text-blue-900' : 'hover:bg-gray-50';
+      const rowClass = index === 0 ? 'bg-gradient-to-r from-gray-50 to-blue-50' : (index % 2 === 0 ? 'bg-white' : 'bg-gray-50 hover:bg-gray-100');
       
       html += `<tr class="${rowClass}">`;
       cells.forEach((cell, cellIndex) => {
+        const headerName = headers[cellIndex] ? headers[cellIndex].trim() : ''; // Get header
         const cellClass = index === 0 ? 
-          'px-4 py-3 border border-gray-200 text-sm font-medium text-center' : 
-          'px-4 py-2 border border-gray-200 text-sm';
+          'px-4 py-3 border border-gray-200 text-sm font-medium text-gray-600 text-left sticky top-0 z-10' : // Sticky header
+          'px-4 py-2 border border-gray-200 text-sm text-gray-800';
         
-        // Special formatting for similarity values
-        const displayValue = this.formatCellValue(cell, cellIndex, index);
-        html += `<${tagName} class="${cellClass}">${displayValue}</${tagName}>`;
+        // Pass headers to formatCellValue
+        const displayValue = this.formatCellValue(cell, cellIndex, index, headers); 
+        
+        // Add vertical-align top for cells that might contain lists
+        let alignClass = (headerName === 'input_similarities' || headerName === 'genre_top3_summary') ? ' align-top' : ' align-middle';
+
+        html += `<${tagName} class="${cellClass}${alignClass}">${displayValue}</${tagName}>`;
       });
       html += '</tr>';
     });
@@ -1891,56 +1706,131 @@ class NovelSimilarityAnalyzer {
     let current = '';
     let inQuotes = false;
     
+    // Handle potential carriage returns in the line
+    line = line.replace(/\r$/, '');
+
     for (let i = 0; i < line.length; i++) {
       const char = line[i];
-      const nextChar = line[i + 1];
       
-      if (char === '"' && !inQuotes) {
-        inQuotes = true;
-      } else if (char === '"' && inQuotes && nextChar === '"') {
-        current += '"';
-        i++; // Skip next quote
-      } else if (char === '"' && inQuotes) {
-        inQuotes = false;
+      if (char === '"') {
+        // Handle escaped quotes ("")
+        if (inQuotes && line[i+1] === '"') {
+          current += '"';
+          i++; // Skip the next quote
+        } else {
+          inQuotes = !inQuotes; // Toggle quote state
+        }
       } else if (char === ',' && !inQuotes) {
+        // End of a cell
         result.push(current.trim());
         current = '';
       } else {
+        // Regular character
         current += char;
       }
     }
     
+    // Add the last cell
     result.push(current.trim());
     return result;
   }
 
-  formatCellValue(value, columnIndex, rowIndex) {
-    // Remove BOM if present
-    const cleanValue = value.replace(/^\ufeff/, '');
+  formatCellValue(value, columnIndex, rowIndex, headers = []) {
+    // Remove BOM if present (usually only on first cell)
+    const cleanValue = (columnIndex === 0 && rowIndex === 0) ? value.replace(/^\ufeff/, '') : value;
     
+    const headerName = headers[columnIndex] ? headers[columnIndex].trim() : ''; // Get the header name, trim whitespace
+
+    // --- Special formatting for input_similarities column ---
+    // Check if the header name matches
+    if (headerName.toLowerCase() === 'input_similarities' && rowIndex > 0) {
+      try {
+        // Replace single quotes used by Python dicts/lists with double quotes for valid JSON
+        // This is fragile; robust CSVs should escape quotes properly or use standard JSON
+        let validJsonString = cleanValue;
+        // Check if it's quoted JSON (e.g., "'[{...}]'")
+        if ((validJsonString.startsWith("'") && validJsonString.endsWith("'")) || (validJsonString.startsWith('"') && validJsonString.endsWith('"'))) {
+             validJsonString = validJsonString.substring(1, validJsonString.length - 1); // Remove outer quotes
+        }
+        validJsonString = validJsonString.replace(/'/g, '"'); // Replace all internal single quotes
+
+        const similarities = JSON.parse(validJsonString);
+
+        if (Array.isArray(similarities)) {
+          // ---
+          // --- **แสดง "จำนวนไฟล์" (ตามคำขอล่าสุด)** ---
+          // ---
+          return `<span class="text-sm font-medium text-gray-700">${similarities.length} matches</span>`;
+
+          // ---
+          // --- **แสดง "List สั้นๆ 3 อันดับ" (ตามคำขอก่อนหน้า)** ---
+          // ---
+          /*
+          const topSimilarities = similarities.slice(0, 3); // แสดง 3 อันดับแรก
+          if (topSimilarities.length === 0) return '<span class="text-xs text-gray-400">No matches</span>';
+
+          let listHtml = '<ul class="list-none text-xs pl-0">'; // Use list-none
+          topSimilarities.forEach((item, idx) => {
+            const fileName = item.database_file || 'N/A';
+            const similarityScore = typeof item.similarity === 'number' ? item.similarity.toFixed(1) : 'N/A';
+            // Add margin between list items
+            listHtml += `<li class="truncate ${idx > 0 ? 'mt-1' : ''}" title="${fileName} (${similarityScore}%)">
+                            <span class="font-medium">${fileName}</span> 
+                            <span class="text-gray-500">(${similarityScore}%)</span>
+                         </li>`;
+          });
+          if (similarities.length > 3) {
+            listHtml += `<li class="text-gray-400 text-xs mt-1">...และอีก ${similarities.length - 3} รายการ</li>`;
+          }
+          listHtml += '</ul>';
+          return listHtml; // คืนค่าเป็น HTML list
+          */
+        }
+      } catch (e) {
+        console.warn("Failed to parse input_similarities:", cleanValue, e);
+        // Fallback to truncated original value if parsing fails
+        return `<span class="text-xs text-red-500" title="Error parsing: ${cleanValue}">[Parse Error]</span>`;
+      }
+    }
+    // --- End special formatting ---
+
     // Format similarity scores (numeric values between 0 and 1)
-    if (rowIndex > 0 && /^\d*\.\d+$/.test(cleanValue)) {
+    if (rowIndex > 0 && /^\d*\.?\d+$/.test(cleanValue)) { // Improved regex
       const numValue = parseFloat(cleanValue);
-      if (numValue >= 0 && numValue <= 1) {
+      // Check if it's likely a similarity score (0-1 range) AND column name suggests it
+      if (!isNaN(numValue) && numValue >= 0 && numValue <= 1.01 && headerName && (headerName.toLowerCase().includes('similarity') || headerName.toLowerCase().includes('score'))) {
         const percentage = (numValue * 100).toFixed(1);
         let colorClass = 'text-gray-600';
         
         if (numValue >= 0.8) colorClass = 'text-red-600 font-bold';
         else if (numValue >= 0.6) colorClass = 'text-orange-600 font-medium';
         else if (numValue >= 0.3) colorClass = 'text-yellow-600';
-        else if (numValue > 0) colorClass = 'text-green-600';
+        else if (numValue > 0) colorClass = 'text-blue-600';
         
         return `<span class="${colorClass}">${percentage}%</span>`;
       }
     }
     
     // Format relation status
-    if (cleanValue === 'duplicate') return '<span class="bg-red-100 text-red-800 px-2 py-1 rounded-full text-xs font-medium">ซ้ำกัน</span>';
-    if (cleanValue === 'similar') return '<span class="bg-orange-100 text-orange-800 px-2 py-1 rounded-full text-xs font-medium">คล้ายคลึง</span>';
-    if (cleanValue === 'different') return '<span class="bg-green-100 text-green-800 px-2 py-1 rounded-full text-xs font-medium">แตกต่าง</span>';
+    if (cleanValue.toLowerCase() === 'duplicate' || cleanValue.toLowerCase() === 'duplicate/near-duplicate') {
+       return '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">ซ้ำซ้อน</span>';
+    }
+    if (cleanValue.toLowerCase() === 'similar') {
+       return '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">คล้ายคลึง</span>';
+    }
+    if (cleanValue.toLowerCase() === 'different') {
+       return '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">แตกต่าง</span>';
+    }
     
+    // Default: return truncated value if too long, else return as is
+    if (cleanValue.length > 100 && rowIndex > 0) { // Don't truncate headers
+        return `<span title="${cleanValue}">${cleanValue.substring(0, 100)}...</span>`;
+    }
     return cleanValue;
   }
+  
+  // --- END: ADDED FUNCTIONS ---
+
 
   generateFileNamesDisplay(data) {
     if (!data.file_name_mapping || Object.keys(data.file_name_mapping).length === 0) {
@@ -1948,7 +1838,7 @@ class NovelSimilarityAnalyzer {
     }
 
     const mappings = Object.entries(data.file_name_mapping)
-      .map(([originalName, customName]) => `<span class="inline-block bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs mr-1 mb-1">${customName}</span>`)
+      .map(([originalName, customName]) => `<span class="inline-block bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs mr-1 mb-1" title="${originalName}">${customName}</span>`) // Added title attribute
       .join('');
 
     return `
@@ -1961,18 +1851,19 @@ class NovelSimilarityAnalyzer {
 
   generateAnalyzedWorksHeader(data) {
     if (!data.file_name_mapping || Object.keys(data.file_name_mapping).length === 0) {
-      return '';
+        console.warn("Analyzed works header skipped: No file_name_mapping.");
+        return ''; // Don't render if no mapping provided
     }
 
     const works = Object.entries(data.file_name_mapping)
       .map(([originalName, customName]) => `
-        <div class="flex items-center bg-gradient-to-r from-purple-100 to-blue-100 rounded-lg p-4 mb-3">
+        <div class="flex items-center bg-gradient-to-r from-purple-100 to-blue-100 rounded-lg p-4 mb-3 gap-3">
           <div class="flex-shrink-0">
-            <i class="fas fa-book text-2xl text-purple-600 mr-3"></i>
+            <i class="fas fa-book text-2xl text-purple-600"></i>
           </div>
-          <div class="flex-1">
-            <h3 class="text-lg font-bold text-purple-900">${customName}</h3>
-            <p class="text-sm text-purple-700">ไฟล์ต้นฉบบ: ${originalName}</p>
+          <div class="flex-1 min-w-0">
+            <h3 class="text-lg font-bold text-purple-900 truncate" title="${customName}">${customName}</h3>
+            <p class="text-sm text-purple-700 truncate" title="ไฟล์ต้นฉบับ: ${originalName}">ไฟล์ต้นฉบับ: ${originalName}</p>
           </div>
           <div class="flex-shrink-0">
             <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-purple-200 text-purple-800">
@@ -2003,16 +1894,27 @@ class NovelSimilarityAnalyzer {
     try {
       const downloadUrl = this.apiBaseUrl ? `${this.apiBaseUrl}/api/download/${this.currentSessionId}` : `/api/download/${this.currentSessionId}`;
       const response = await axios.get(downloadUrl, {
-        responseType: 'blob'
+        responseType: 'blob' // Important for file downloads
       });
       
       // Create download link
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `similarity_analysis_results_${this.currentSessionId}.zip`);
+      // Extract filename from Content-Disposition header if available, otherwise use default
+      const contentDisposition = response.headers['content-disposition'];
+      let filename = `similarity_analysis_results_${this.currentSessionId}.zip`;
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="?(.+)"?/i);
+        if (filenameMatch && filenameMatch.length > 1) {
+          filename = filenameMatch[1];
+        }
+      }
+      link.setAttribute('download', filename);
       document.body.appendChild(link);
       link.click();
+
+      // Clean up
       link.remove();
       window.URL.revokeObjectURL(url);
       
@@ -2020,58 +1922,108 @@ class NovelSimilarityAnalyzer {
       
     } catch (error) {
       console.error('Download failed:', error);
-      this.showAlert('เกิดข้อผิดพลาดในการดาวน์โหลด', 'error');
+       let errorMsg = 'เกิดข้อผิดพลาดในการดาวน์โหลด';
+        if (error.response && error.response.status === 404) {
+            errorMsg = 'ไม่พบไฟล์ผลลัพธ์บนเซิร์ฟเวอร์ (404)';
+        } else if (error.message.includes('Network Error')) {
+            errorMsg = 'ไม่สามารถเชื่อมต่อเพื่อดาวน์โหลดไฟล์';
+        }
+       this.showAlert(errorMsg, 'error');
     }
   }
 
   startNewAnalysis() {
-    // Reset form
-    document.getElementById('analysisForm').reset();
-    document.getElementById('inputFilesList').innerHTML = '';
-    document.getElementById('databaseFileInfo').innerHTML = '';
+    // Reset form elements
+    const form = document.getElementById('analysisForm');
+    if (form) form.reset();
     
-    // Hide results
+    // Clear file lists
+    const inputList = document.getElementById('inputFilesList');
+    if (inputList) inputList.innerHTML = '';
+    const dbInfo = document.getElementById('databaseFileInfo');
+    if (dbInfo) dbInfo.innerHTML = '';
+    const namesPreview = document.getElementById('novelNamesPreview');
+    if (namesPreview) namesPreview.innerHTML = '';
+
+    // Clear stored files state
+    this.currentFiles = null;
+    this.folderFiles = null;
+    
+    // Hide results and loading sections
     const resultsSection = document.getElementById('resultsSection');
-    resultsSection.classList.add('hidden');
+    if (resultsSection) resultsSection.classList.add('hidden');
+    const loadingSection = document.getElementById('loadingSection');
+    if(loadingSection) loadingSection.classList.add('hidden'); // Ensure loading is hidden too
+    
+    // Re-enable button
+    const analyzeBtn = document.getElementById('analyzeBtn');
+    if(analyzeBtn) analyzeBtn.disabled = false;
     
     // Scroll to top
     window.scrollTo({ top: 0, behavior: 'smooth' });
     
-    // Clear session
+    // Clear session ID
     this.currentSessionId = null;
+    this.currentResults = null; // Also clear results data
   }
 
   openImageModal(img) {
-    // Simple image modal (you can enhance this)
-    const modal = document.createElement('div');
-    modal.className = 'fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50';
-    modal.innerHTML = `
-      <div class="max-w-full max-h-full p-4">
-        <img src="${img.src}" alt="${img.alt}" class="max-w-full max-h-full" />
-        <button onclick="this.parentElement.parentElement.remove()" class="absolute top-4 right-4 text-white text-2xl">
-          <i class="fas fa-times"></i>
-        </button>
-      </div>
-    `;
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) {
-        modal.remove();
-      }
+    // Create modal elements
+    const modalOverlay = document.createElement('div');
+    modalOverlay.className = 'fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 p-4';
+    modalOverlay.style.cursor = 'zoom-out'; // Indicate click to close
+
+    const modalContent = document.createElement('div');
+    modalContent.className = 'relative max-w-full max-h-full';
+
+    const modalImage = document.createElement('img');
+    modalImage.src = img.src;
+    modalImage.alt = img.alt;
+    modalImage.className = 'block max-w-full max-h-[90vh] object-contain'; // Limit height
+
+    const closeButton = document.createElement('button');
+    closeButton.className = 'absolute top-2 right-2 text-white text-3xl bg-black bg-opacity-50 rounded-full w-8 h-8 flex items-center justify-center hover:bg-opacity-75';
+    closeButton.innerHTML = '<i class="fas fa-times"></i>';
+    closeButton.style.cursor = 'pointer';
+
+    // Append elements
+    modalContent.appendChild(modalImage);
+    modalContent.appendChild(closeButton);
+    modalOverlay.appendChild(modalContent);
+    document.body.appendChild(modalOverlay);
+
+    // Close modal function
+    const closeModal = () => {
+        if (modalOverlay.parentElement) {
+            modalOverlay.remove();
+        }
+    };
+
+    // Event listeners for closing
+    modalOverlay.addEventListener('click', (e) => {
+        // Close if clicking the overlay itself, not the image/button
+        if (e.target === modalOverlay) {
+            closeModal();
+        }
     });
-    document.body.appendChild(modal);
-  }
+    closeButton.addEventListener('click', closeModal);
+}
 
   showAlert(message, type = 'info') {
+    // Remove existing alerts first
+    document.querySelectorAll('.analysis-alert').forEach(alert => alert.remove());
+
     // Create alert element
     const alert = document.createElement('div');
-    alert.className = `fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg max-w-md ${this.getAlertClasses(type)}`;
+    // Add a specific class for easy removal
+    alert.className = `analysis-alert fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg max-w-md ${this.getAlertClasses(type)}`;
     alert.innerHTML = `
       <div class="flex items-start">
-        <i class="${this.getAlertIcon(type)} mr-2 mt-0.5"></i>
+        <i class="${this.getAlertIcon(type)} mr-2 mt-0.5 flex-shrink-0"></i>
         <div class="flex-1">
           <p class="font-medium">${message}</p>
         </div>
-        <button onclick="this.parentElement.parentElement.remove()" class="ml-2">
+        <button onclick="this.parentElement.parentElement.remove()" class="ml-2 flex-shrink-0">
           <i class="fas fa-times"></i>
         </button>
       </div>
@@ -2079,12 +2031,14 @@ class NovelSimilarityAnalyzer {
     
     document.body.appendChild(alert);
     
-    // Auto remove after 5 seconds
+    // Auto remove after 7 seconds (longer for errors)
+    const duration = type === 'error' ? 10000 : 7000;
     setTimeout(() => {
+      // Check if the alert still exists before removing
       if (alert.parentElement) {
         alert.remove();
       }
-    }, 5000);
+    }, duration);
   }
 
   getAlertClasses(type) {
@@ -2108,19 +2062,47 @@ class NovelSimilarityAnalyzer {
 
 // Initialize the application when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-  window.analyzer = new NovelSimilarityAnalyzer();
+  if (!window.analyzer) { // Prevent multiple initializations
+      window.analyzer = new NovelSimilarityAnalyzer();
+  }
 });
 
 // Health check on page load - using auto-detected URL
 document.addEventListener('DOMContentLoaded', async () => {
+  // Check if health check already ran (simple flag)
+  if (window.healthChecked) return;
+  window.healthChecked = true;
+
   try {
-    // Get the analyzer instance to use its apiBaseUrl
-    const analyzerInstance = window.analyzer || new NovelSimilarityAnalyzer();
-  const _healthBase = analyzerInstance.apiBaseUrl || (typeof window !== 'undefined' && window.apiBaseUrl) || 'http://localhost:8000';
-  const healthUrl = `${_healthBase}/api/health`;
-    const response = await axios.get(healthUrl);
+    // Get the analyzer instance to use its apiBaseUrl or create temp one
+    // Ensure analyzer is created if it wasn't
+    if (!window.analyzer) {
+         window.analyzer = new NovelSimilarityAnalyzer();
+    }
+    const analyzerInstance = window.analyzer;
+    const _healthBase = analyzerInstance.apiBaseUrl; // Use the resolved URL
+    const healthUrl = `${_healthBase}/api/health`;
+    
+    // Set a short timeout for health check
+    const response = await axios.get(healthUrl, { timeout: 5000 });
     console.log('Backend health:', response.data);
+    // Optionally show a small status indicator on the page
+     const statusIndicator = document.getElementById('backendStatus');
+     if(statusIndicator) {
+         statusIndicator.innerHTML = '<i class="fas fa-circle text-green-500 mr-1"></i> Backend Connected';
+         statusIndicator.className = 'text-xs text-green-600';
+     }
+
   } catch (error) {
-    console.warn('Backend not available:', error.message);
+    console.warn('Backend health check failed:', error.message);
+    const statusIndicator = document.getElementById('backendStatus');
+     if(statusIndicator) {
+         statusIndicator.innerHTML = '<i class="fas fa-circle text-red-500 mr-1"></i> Backend Disconnected';
+         statusIndicator.className = 'text-xs text-red-600';
+     }
+     // Show a non-intrusive warning to the user
+     // if (window.analyzer) { // Check if analyzer exists before calling showAlert
+     //    window.analyzer.showAlert('ไม่สามารถเชื่อมต่อ Backend ได้ โปรดตรวจสอบ', 'warning');
+     // }
   }
 });
