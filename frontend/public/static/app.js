@@ -2,7 +2,7 @@
  * Novel Similarity Analyzer - Frontend JavaScript
  * Handles file uploads, API communication, and results display
  *
- * (เวอร์ชันสมบูรณ์ - แก้ไข TypeError และ input_similarities แล้ว)
+ * (เวอร์ชันสมบูรณ์ - แก้ไข TypeError, input_similarities, และการจัดรูปแบบตาราง Matrix)
  */
 
 // Add CSS styles for visualizations
@@ -1444,7 +1444,7 @@ class NovelSimilarityAnalyzer {
 
 
     // --- START FIX FOR MISSING LINES ---
-    // สร้าง Trace เดียวสำหรับ "เส้น" ทั้งหมด
+    // Create ONE trace for ALL lines
     const edgeX = [];
     const edgeY = [];
     const edgeHoverText = [];
@@ -1453,8 +1453,8 @@ class NovelSimilarityAnalyzer {
         const targetNode = nodeLookup[edge.target]; // Get full node object
         
         if (sourceNode && targetNode) {
-            edgeX.push(xCoords[edge.source], xCoords[edge.target], null); // Add null to break the line
-            edgeY.push(yCoords[edge.source], yCoords[edge.target], null);
+            edgeX.push(sourceNode.x, targetNode.x, null); // Add null to break the line
+            edgeY.push(sourceNode.y, targetNode.y, null);
             edgeHoverText.push(
                 '', // No text for start point
                  // Combine info for line tooltip
@@ -1682,15 +1682,26 @@ class NovelSimilarityAnalyzer {
       html += `<tr class="${rowClass}">`;
       cells.forEach((cell, cellIndex) => {
         const headerName = headers[cellIndex] ? headers[cellIndex].trim() : ''; // Get header
-        const cellClass = index === 0 ? 
-          'px-4 py-3 border border-gray-200 text-sm font-medium text-gray-600 text-left sticky top-0 z-10' : // Sticky header
-          'px-4 py-2 border border-gray-200 text-sm text-gray-800';
+        
+        // --- START: FIX for Table Overlap ---
+        let cellClass = '';
+        if (index === 0) { // Header Row (th)
+          cellClass = 'px-4 py-3 border border-gray-200 text-sm font-medium text-gray-600 text-left sticky top-0 z-10 whitespace-nowrap min-w-[200px]'; // <-- ADDED whitespace-nowrap & min-w
+        } else { // Data Row (td)
+          cellClass = 'px-4 py-2 border border-gray-200 text-sm text-gray-800';
+        }
         
         // Pass headers to formatCellValue
         const displayValue = this.formatCellValue(cell, cellIndex, index, headers); 
         
-        // Add vertical-align top for cells that might contain lists
-        let alignClass = (headerName === 'input_similarities' || headerName === 'genre_top3_summary') ? ' align-top' : ' align-middle';
+        // Align text in cells
+        let alignClass = ' align-middle'; // Default
+        if (headerName.toLowerCase() === 'input_similarities' || headerName.toLowerCase() === 'genre_top3_summary') {
+            alignClass = ' align-top'; // Align lists to the top
+        } else if (cellIndex > 0 && index > 0) { // If it's a data cell (not row header)
+            alignClass = ' align-middle text-center'; // <-- ADDED text-center
+        }
+        // --- END: FIX for Table Overlap ---
 
         html += `<${tagName} class="${cellClass}${alignClass}">${displayValue}</${tagName}>`;
       });
@@ -1742,17 +1753,15 @@ class NovelSimilarityAnalyzer {
     const headerName = headers[columnIndex] ? headers[columnIndex].trim() : ''; // Get the header name, trim whitespace
 
     // --- Special formatting for input_similarities column ---
-    // Check if the header name matches
     if (headerName.toLowerCase() === 'input_similarities' && rowIndex > 0) {
       try {
         // Replace single quotes used by Python dicts/lists with double quotes for valid JSON
-        // This is fragile; robust CSVs should escape quotes properly or use standard JSON
         let validJsonString = cleanValue;
-        // Check if it's quoted JSON (e.g., "'[{...}]'")
         if ((validJsonString.startsWith("'") && validJsonString.endsWith("'")) || (validJsonString.startsWith('"') && validJsonString.endsWith('"'))) {
              validJsonString = validJsonString.substring(1, validJsonString.length - 1); // Remove outer quotes
         }
         validJsonString = validJsonString.replace(/'/g, '"'); // Replace all internal single quotes
+        validJsonString = validJsonString.replace(/None/g, 'null'); // Replace Python None with JSON null
 
         const similarities = JSON.parse(validJsonString);
 
@@ -1761,55 +1770,42 @@ class NovelSimilarityAnalyzer {
           // --- **แสดง "จำนวนไฟล์" (ตามคำขอล่าสุด)** ---
           // ---
           return `<span class="text-sm font-medium text-gray-700">${similarities.length} matches</span>`;
-
-          // ---
-          // --- **แสดง "List สั้นๆ 3 อันดับ" (ตามคำขอก่อนหน้า)** ---
-          // ---
-          /*
-          const topSimilarities = similarities.slice(0, 3); // แสดง 3 อันดับแรก
-          if (topSimilarities.length === 0) return '<span class="text-xs text-gray-400">No matches</span>';
-
-          let listHtml = '<ul class="list-none text-xs pl-0">'; // Use list-none
-          topSimilarities.forEach((item, idx) => {
-            const fileName = item.database_file || 'N/A';
-            const similarityScore = typeof item.similarity === 'number' ? item.similarity.toFixed(1) : 'N/A';
-            // Add margin between list items
-            listHtml += `<li class="truncate ${idx > 0 ? 'mt-1' : ''}" title="${fileName} (${similarityScore}%)">
-                            <span class="font-medium">${fileName}</span> 
-                            <span class="text-gray-500">(${similarityScore}%)</span>
-                         </li>`;
-          });
-          if (similarities.length > 3) {
-            listHtml += `<li class="text-gray-400 text-xs mt-1">...และอีก ${similarities.length - 3} รายการ</li>`;
-          }
-          listHtml += '</ul>';
-          return listHtml; // คืนค่าเป็น HTML list
-          */
         }
       } catch (e) {
         console.warn("Failed to parse input_similarities:", cleanValue, e);
-        // Fallback to truncated original value if parsing fails
         return `<span class="text-xs text-red-500" title="Error parsing: ${cleanValue}">[Parse Error]</span>`;
       }
     }
     // --- End special formatting ---
 
-    // Format similarity scores (numeric values between 0 and 1)
-    if (rowIndex > 0 && /^\d*\.?\d+$/.test(cleanValue)) { // Improved regex
+    // --- START: FIX for Similarity Matrix formatting ---
+    if (rowIndex > 0 && /^\d*\.?\d+$/.test(cleanValue)) {
       const numValue = parseFloat(cleanValue);
-      // Check if it's likely a similarity score (0-1 range) AND column name suggests it
-      if (!isNaN(numValue) && numValue >= 0 && numValue <= 1.01 && headerName && (headerName.toLowerCase().includes('similarity') || headerName.toLowerCase().includes('score'))) {
-        const percentage = (numValue * 100).toFixed(1);
-        let colorClass = 'text-gray-600';
-        
-        if (numValue >= 0.8) colorClass = 'text-red-600 font-bold';
-        else if (numValue >= 0.6) colorClass = 'text-orange-600 font-medium';
-        else if (numValue >= 0.3) colorClass = 'text-yellow-600';
-        else if (numValue > 0) colorClass = 'text-blue-600';
-        
-        return `<span class="${colorClass}">${percentage}%</span>`;
+      
+      if (!isNaN(numValue) && numValue >= 0 && numValue <= 1.01) {
+          // Check if it's a "top_similarity" column (format as Percentage)
+          if (headerName.toLowerCase().includes('similarity')) {
+            const percentage = (numValue * 100).toFixed(1);
+            let colorClass = 'text-gray-600';
+            if (numValue >= 0.8) colorClass = 'text-red-600 font-bold';
+            else if (numValue >= 0.6) colorClass = 'text-orange-600 font-medium';
+            else if (numValue >= 0.3) colorClass = 'text-yellow-600';
+            else if (numValue > 0) colorClass = 'text-blue-600';
+            return `<span class="${colorClass}">${percentage}%</span>`;
+          }
+          // Check if it's in the Similarity Matrix (columnIndex > 0 and not 'top_similarity')
+          else if (columnIndex > 0) { 
+            const decimalValue = numValue.toFixed(2); // Format to 2 decimal places
+            let colorClass = 'text-gray-600';
+            if (numValue >= 0.8) colorClass = 'text-red-600 font-bold';
+            else if (numValue >= 0.6) colorClass = 'text-orange-600 font-medium';
+            else if (numValue >= 0.3) colorClass = 'text-yellow-600';
+            else if (numValue > 0) colorClass = 'text-blue-600';
+            return `<span class="${colorClass}">${decimalValue}</span>`;
+          }
       }
     }
+    // --- END: FIX for Similarity Matrix formatting ---
     
     // Format relation status
     if (cleanValue.toLowerCase() === 'duplicate' || cleanValue.toLowerCase() === 'duplicate/near-duplicate') {
